@@ -20,4 +20,4 @@ Open [http://localhost:3000](http://localhost:3000).
 - **Another** skips today’s pick and draws a new weighted suggestion.
 - One sticky pick per calendar day (until you skip or dislike it).
 
-Album artwork and Apple Music deep links come from the iTunes Search API via `/api/album-meta`. Spotify opens a search for the artist + album.
+Album artwork comes from Deezer search via `/api/album-meta`. Apple Music opens a collection link when iTunes finds a confident match, otherwise an Apple Music search. Spotify opens a search for the artist + album.
