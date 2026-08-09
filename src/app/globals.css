@@ -313,8 +313,59 @@ a {
   cursor: pointer;
 }
 
+.idle-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  margin-top: 0.25rem;
+}
+
+.hero--album .idle-links {
+  align-items: center;
+}
+
 .hero--album .text-link {
   align-self: center;
+}
+
+.inspire-empty {
+  margin: 1rem 0 0;
+  color: var(--fog-dim);
+  line-height: 1.45;
+}
+
+.inspire-group {
+  margin-top: 0.75rem;
+}
+
+.inspire-group__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.65rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.inspire-group__dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.inspire-group__count {
+  margin-left: auto;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fog-dim);
+}
+
+.inspire-row .search-row__actions {
+  grid-template-columns: 1fr;
 }
 
 .hero--search {

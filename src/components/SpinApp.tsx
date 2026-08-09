@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import type { Album } from "@/data/albums";
 import AlbumSearch from "@/components/AlbumSearch";
+import FriendsLikes from "@/components/FriendsLikes";
 import ProfilePicker from "@/components/ProfilePicker";
 import {
   appleMusicSearchUrl,
@@ -26,9 +27,16 @@ import {
   type ProfileStore,
 } from "@/lib/profiles";
 import { getStickyOrPick } from "@/lib/recommend";
+import { otherProfilesLikedLists } from "@/lib/likes";
 import type { SearchHit } from "@/lib/search";
 
-type Phase = "boot" | "pick-profile" | "idle" | "revealed" | "search";
+type Phase =
+  | "boot"
+  | "pick-profile"
+  | "idle"
+  | "revealed"
+  | "search"
+  | "inspire";
 
 function albumPhaseForPrefs(prefs: PreferenceState): {
   album: Album | null;
@@ -126,12 +134,21 @@ export default function SpinApp() {
     setPhase("search");
   }
 
-  function closeSearch() {
+  function openInspire() {
+    setReturnPhase(phase === "revealed" ? "revealed" : "idle");
+    setPhase("inspire");
+  }
+
+  function closeOverlay() {
     if (returnPhase === "revealed" && album) {
       setPhase("revealed");
     } else {
       setPhase("idle");
     }
+  }
+
+  function closeSearch() {
+    closeOverlay();
   }
 
   function spin(reshuffle = false) {
@@ -196,6 +213,14 @@ export default function SpinApp() {
     showFlash("Noted — steering away.");
   }
 
+  function onFriendLike(albumToLike: Album) {
+    if (!prefs) return;
+    let next = rememberAlbum(prefs, albumToLike);
+    next = applyFeedback(next, albumToLike, "listened");
+    persistPrefs(next);
+    showFlash(`Liked ${albumToLike.title}.`);
+  }
+
   if (!hydrated || phase === "boot" || !store) {
     return (
       <main className="shell">
@@ -255,9 +280,9 @@ export default function SpinApp() {
               {active.name}
             </button>
           )}
-          {phase !== "pick-profile" && phase !== "search" && (
-            <p className="taste">{taste}</p>
-          )}
+          {phase !== "pick-profile" &&
+            phase !== "search" &&
+            phase !== "inspire" && <p className="taste">{taste}</p>}
         </div>
       </header>
 
@@ -271,6 +296,15 @@ export default function SpinApp() {
           onDislike={onSearchDislike}
           onBack={closeSearch}
           likedIds={likedIds}
+        />
+      )}
+
+      {phase === "inspire" && (
+        <FriendsLikes
+          lists={otherProfilesLikedLists(store, active?.id ?? null)}
+          myLikedIds={likedIds}
+          onLike={onFriendLike}
+          onBack={closeOverlay}
         />
       )}
 
@@ -291,9 +325,14 @@ export default function SpinApp() {
               {spinning ? "Finding…" : "Spin today’s album"}
             </span>
           </button>
-          <button type="button" className="text-link" onClick={openSearch}>
-            Search an album you like
-          </button>
+          <div className="idle-links">
+            <button type="button" className="text-link" onClick={openSearch}>
+              Search an album you like
+            </button>
+            <button type="button" className="text-link" onClick={openInspire}>
+              See other drivers’ likes
+            </button>
+          </div>
         </section>
       )}
 
@@ -362,9 +401,14 @@ export default function SpinApp() {
             </button>
           </div>
 
-          <button type="button" className="text-link" onClick={openSearch}>
-            Search an album
-          </button>
+          <div className="idle-links">
+            <button type="button" className="text-link" onClick={openSearch}>
+              Search an album
+            </button>
+            <button type="button" className="text-link" onClick={openInspire}>
+              Other drivers’ likes
+            </button>
+          </div>
         </section>
       )}
 
