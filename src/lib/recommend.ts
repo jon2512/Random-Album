@@ -7,10 +7,17 @@ function daysSince(iso: string | undefined): number {
   return ms / (1000 * 60 * 60 * 24);
 }
 
+function albumPool(prefs: PreferenceState): Album[] {
+  const customs = prefs.customAlbums ?? [];
+  if (customs.length === 0) return ALBUMS;
+  const ids = new Set(ALBUMS.map((a) => a.id));
+  return [...ALBUMS, ...customs.filter((a) => !ids.has(a.id))];
+}
+
 function scoreAlbum(album: Album, prefs: PreferenceState): number {
   if (prefs.disliked.includes(album.id)) return -Infinity;
 
-  let score = 1; // base so everything remains pickable early on
+  let score = 1;
 
   for (const g of album.genres) {
     score += (prefs.genreScores[g] ?? 0) * 1.4;
@@ -18,10 +25,11 @@ function scoreAlbum(album: Album, prefs: PreferenceState): number {
   for (const m of album.moods) {
     score += (prefs.moodScores[m] ?? 0) * 1.1;
   }
-  score += (prefs.decadeScores[decadeOf(album.year)] ?? 0) * 1.0;
+  if (album.year > 0) {
+    score += (prefs.decadeScores[decadeOf(album.year)] ?? 0) * 1.0;
+  }
   score += (prefs.artistScores[album.artist] ?? 0) * 1.6;
 
-  // Soft exploration: boost never-suggested albums slightly
   const suggestedDays = daysSince(prefs.suggested[album.id]);
   if (suggestedDays === Infinity) score += 1.2;
   else if (suggestedDays < 14) score -= (14 - suggestedDays) * 0.35;
@@ -29,14 +37,11 @@ function scoreAlbum(album: Album, prefs: PreferenceState): number {
   const listenedDays = daysSince(prefs.listened[album.id]);
   if (listenedDays < 30) score -= (30 - listenedDays) * 0.25;
 
-  // Liked albums can resurface after a while, but not immediately
   if ((prefs.liked[album.id] ?? 0) > 0 && listenedDays > 60) {
     score += 0.8;
   }
 
-  // Exploration vs exploitation: as feedback grows, sharpen preferences
   const sharpness = Math.min(1.5, 0.4 + prefs.totalFeedback * 0.04);
-  // Convert raw score; keep a floor so low scores still have a chance
   return Math.max(0.05, Math.pow(Math.max(score, 0.05), sharpness));
 }
 
@@ -51,8 +56,9 @@ export function pickAlbum(
     ...prefs.disliked,
   ]);
 
-  const candidates = ALBUMS.filter((a) => !exclude.has(a.id));
-  const pool = candidates.length > 0 ? candidates : ALBUMS;
+  const all = albumPool(prefs);
+  const candidates = all.filter((a) => !exclude.has(a.id));
+  const pool = candidates.length > 0 ? candidates : all;
 
   const weights = pool.map((a) => scoreAlbum(a, prefs));
   const total = weights.reduce((s, w) => s + Math.max(w, 0), 0);
@@ -75,15 +81,16 @@ export function getStickyOrPick(
   reshuffle = false,
 ): { album: Album; prefs: PreferenceState; isNew: boolean } {
   if (!reshuffle && prefs.dailyPick[dateKey]) {
-    const existing = ALBUMS.find((a) => a.id === prefs.dailyPick[dateKey]);
+    const existing = albumPool(prefs).find(
+      (a) => a.id === prefs.dailyPick[dateKey],
+    );
     if (existing && !prefs.disliked.includes(existing.id)) {
       return { album: existing, prefs, isNew: false };
     }
   }
 
-  const exclude = reshuffle && prefs.dailyPick[dateKey]
-    ? [prefs.dailyPick[dateKey]]
-    : [];
+  const exclude =
+    reshuffle && prefs.dailyPick[dateKey] ? [prefs.dailyPick[dateKey]] : [];
   const album = pickAlbum(prefs, { forceExclude: exclude });
   const nextPrefs = {
     ...prefs,

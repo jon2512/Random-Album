@@ -27,6 +27,7 @@ npx serve out
 - Up to 4 named drivers
 - Separate listen / dislike history and recommendation weights per profile
 - Tap the name chip in the header to switch
+- **Search an album** — find something you thought of and tap **I like this** (or **Not for me**) to train that profile
 
 ## How it learns
 

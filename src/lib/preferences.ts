@@ -1,4 +1,4 @@
-import type { Album, Genre, Mood } from "@/data/albums";
+import { ALBUMS, type Album, type Genre, type Mood } from "@/data/albums";
 import { decadeOf } from "@/data/albums";
 
 /** Legacy key — migrated into profiles on first load */
@@ -17,6 +17,8 @@ export type PreferenceState = {
   artistScores: Record<string, number>;
   dailyPick: Record<string, string>;
   totalFeedback: number;
+  /** Albums liked via search that aren't in the curated catalog */
+  customAlbums: Album[];
 };
 
 export function emptyPreferences(): PreferenceState {
@@ -31,6 +33,7 @@ export function emptyPreferences(): PreferenceState {
     artistScores: {},
     dailyPick: {},
     totalFeedback: 0,
+    customAlbums: [],
   };
 }
 
@@ -58,11 +61,12 @@ export function applyFeedback(
     decadeScores: { ...state.decadeScores },
     artistScores: { ...state.artistScores },
     dailyPick: { ...state.dailyPick },
+    customAlbums: [...(state.customAlbums ?? [])],
     totalFeedback: state.totalFeedback + 1,
   };
 
   const today = new Date().toISOString();
-  const decade = decadeOf(album.year);
+  const decade = album.year > 0 ? decadeOf(album.year) : null;
 
   if (kind === "listened") {
     next.listened[album.id] = today;
@@ -73,7 +77,7 @@ export function applyFeedback(
     for (const m of album.moods) {
       next.moodScores[m] = (next.moodScores[m] ?? 0) + 1.5;
     }
-    next.decadeScores = bump(next.decadeScores, decade, 1.5);
+    if (decade) next.decadeScores = bump(next.decadeScores, decade, 1.5);
     next.artistScores = bump(next.artistScores, album.artist, 2.5);
   } else if (kind === "dislike") {
     if (!next.disliked.includes(album.id)) next.disliked.push(album.id);
@@ -84,7 +88,7 @@ export function applyFeedback(
     for (const m of album.moods) {
       next.moodScores[m] = (next.moodScores[m] ?? 0) - 1.5;
     }
-    next.decadeScores = bump(next.decadeScores, decade, -1.5);
+    if (decade) next.decadeScores = bump(next.decadeScores, decade, -1.5);
     next.artistScores = bump(next.artistScores, album.artist, -3);
   } else {
     next.suggested[album.id] = today;
@@ -94,6 +98,22 @@ export function applyFeedback(
   }
 
   return next;
+}
+
+/** Persist a searched album into the profile library if it's not curated. */
+export function rememberAlbum(
+  state: PreferenceState,
+  album: Album,
+): PreferenceState {
+  const inCatalog = ALBUMS.some((a) => a.id === album.id);
+  const customs = state.customAlbums ?? [];
+  if (inCatalog || customs.some((a) => a.id === album.id)) {
+    return { ...state, customAlbums: customs };
+  }
+  return {
+    ...state,
+    customAlbums: [...customs, album],
+  };
 }
 
 export function todayKey(d = new Date()): string {

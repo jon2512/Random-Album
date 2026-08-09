@@ -67,7 +67,7 @@ function score(
   return s;
 }
 
-function jsonp<T>(url: string, callbackParam = "callback"): Promise<T> {
+export function jsonp<T>(url: string, callbackParam = "callback"): Promise<T> {
   return new Promise((resolve, reject) => {
     const cbName = `spinJsonp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const script = document.createElement("script");

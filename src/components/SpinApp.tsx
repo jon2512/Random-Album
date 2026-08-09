@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import type { Album } from "@/data/albums";
+import AlbumSearch from "@/components/AlbumSearch";
 import ProfilePicker from "@/components/ProfilePicker";
 import {
   appleMusicSearchUrl,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/links";
 import {
   applyFeedback,
+  rememberAlbum,
   todayKey,
   topTasteSummary,
   type PreferenceState,
@@ -24,8 +26,9 @@ import {
   type ProfileStore,
 } from "@/lib/profiles";
 import { getStickyOrPick } from "@/lib/recommend";
+import type { SearchHit } from "@/lib/search";
 
-type Phase = "boot" | "pick-profile" | "idle" | "revealed";
+type Phase = "boot" | "pick-profile" | "idle" | "revealed" | "search";
 
 function albumPhaseForPrefs(prefs: PreferenceState): {
   album: Album | null;
@@ -43,6 +46,7 @@ export default function SpinApp() {
   const [hydrated, setHydrated] = useState(false);
   const [store, setStore] = useState<ProfileStore | null>(null);
   const [phase, setPhase] = useState<Phase>("boot");
+  const [returnPhase, setReturnPhase] = useState<"idle" | "revealed">("idle");
   const [album, setAlbum] = useState<Album | null>(null);
   const [meta, setMeta] = useState<AlbumMeta | null>(null);
   const [metaForId, setMetaForId] = useState<string | null>(null);
@@ -64,6 +68,7 @@ export default function SpinApp() {
         const { album: a, phase: p } = albumPhaseForPrefs(profile.preferences);
         setAlbum(a);
         setPhase(p);
+        setReturnPhase(p);
       }
       setHydrated(true);
     });
@@ -108,11 +113,25 @@ export default function SpinApp() {
     setMeta(null);
     setMetaForId(null);
     setPhase(p);
+    setReturnPhase(p);
   }
 
   function showFlash(message: string) {
     setFlash(message);
     window.setTimeout(() => setFlash(null), 2200);
+  }
+
+  function openSearch() {
+    setReturnPhase(phase === "revealed" ? "revealed" : "idle");
+    setPhase("search");
+  }
+
+  function closeSearch() {
+    if (returnPhase === "revealed" && album) {
+      setPhase("revealed");
+    } else {
+      setPhase("idle");
+    }
   }
 
   function spin(reshuffle = false) {
@@ -125,6 +144,7 @@ export default function SpinApp() {
         persistPrefs(result.prefs);
         setAlbum(result.album);
         setPhase("revealed");
+        setReturnPhase("revealed");
         setSpinning(false);
       }, 650);
     });
@@ -151,12 +171,29 @@ export default function SpinApp() {
     setMeta(null);
     setMetaForId(null);
     setPhase("idle");
+    setReturnPhase("idle");
   }
 
   function onSkip() {
     if (!prefs || !album) return;
     persistPrefs(applyFeedback(prefs, album, "skip"));
     spin(true);
+  }
+
+  function onSearchLike(hit: SearchHit) {
+    if (!prefs) return;
+    let next = rememberAlbum(prefs, hit.album);
+    next = applyFeedback(next, hit.album, "listened");
+    persistPrefs(next);
+    showFlash(`Liked ${hit.album.title}.`);
+  }
+
+  function onSearchDislike(hit: SearchHit) {
+    if (!prefs) return;
+    let next = rememberAlbum(prefs, hit.album);
+    next = applyFeedback(next, hit.album, "dislike");
+    persistPrefs(next);
+    showFlash("Noted — steering away.");
   }
 
   if (!hydrated || phase === "boot" || !store) {
@@ -178,6 +215,7 @@ export default function SpinApp() {
         : "#";
   const spotifyUrl = album ? spotifySearchUrl(album) : "#";
   const metaLoading = !!album && metaForId !== album.id;
+  const likedIds = new Set(Object.keys(prefs?.liked ?? {}));
 
   return (
     <main
@@ -217,12 +255,23 @@ export default function SpinApp() {
               {active.name}
             </button>
           )}
-          {phase !== "pick-profile" && <p className="taste">{taste}</p>}
+          {phase !== "pick-profile" && phase !== "search" && (
+            <p className="taste">{taste}</p>
+          )}
         </div>
       </header>
 
       {phase === "pick-profile" && (
         <ProfilePicker store={store} onChange={onStoreChange} />
+      )}
+
+      {phase === "search" && (
+        <AlbumSearch
+          onLike={onSearchLike}
+          onDislike={onSearchDislike}
+          onBack={closeSearch}
+          likedIds={likedIds}
+        />
       )}
 
       {phase === "idle" && (
@@ -241,6 +290,9 @@ export default function SpinApp() {
             <span className="spin-btn__label">
               {spinning ? "Finding…" : "Spin today’s album"}
             </span>
+          </button>
+          <button type="button" className="text-link" onClick={openSearch}>
+            Search an album you like
           </button>
         </section>
       )}
@@ -273,9 +325,9 @@ export default function SpinApp() {
             <p className="album-artist">{album.artist}</p>
             <h1 className="album-title">{album.title}</h1>
             <p className="album-meta">
-              {album.year}
+              {album.year > 0 ? album.year : "—"}
               <span aria-hidden> · </span>
-              {album.genres.slice(0, 2).join(" / ")}
+              {album.genres.slice(0, 2).join(" / ") || "album"}
             </p>
           </div>
 
@@ -309,6 +361,10 @@ export default function SpinApp() {
               Not for me
             </button>
           </div>
+
+          <button type="button" className="text-link" onClick={openSearch}>
+            Search an album
+          </button>
         </section>
       )}
 
