@@ -1,18 +1,16 @@
 import type { NextConfig } from "next";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 const nextConfig: NextConfig = {
+  output: "export",
+  basePath: basePath || undefined,
+  assetPrefix: basePath || undefined,
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**.mzstatic.com",
-      },
-      {
-        protocol: "https",
-        hostname: "cdn-images.dzcdn.net",
-      },
-    ],
+    unoptimized: true,
   },
+  // Avoid trailingSlash issues on GitHub Pages project sites
+  trailingSlash: true,
 };
 
 export default nextConfig;

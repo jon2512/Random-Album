@@ -1,24 +1,20 @@
 import type { Album, Genre, Mood } from "@/data/albums";
 import { decadeOf } from "@/data/albums";
 
-const STORAGE_KEY = "spin-preferences-v1";
+/** Legacy key — migrated into profiles on first load */
+export const LEGACY_PREFS_KEY = "spin-preferences-v1";
 
 export type FeedbackKind = "listened" | "dislike" | "skip";
 
 export type PreferenceState = {
-  /** albumId -> positive score boost */
   liked: Record<string, number>;
-  /** albumId -> permanently avoid */
   disliked: string[];
-  /** albumId -> ISO date last listened */
   listened: Record<string, string>;
-  /** albumId -> ISO date last suggested */
   suggested: Record<string, string>;
   genreScores: Partial<Record<Genre, number>>;
   moodScores: Partial<Record<Mood, number>>;
   decadeScores: Record<string, number>;
   artistScores: Record<string, number>;
-  /** YYYY-MM-DD -> albumId for sticky daily pick */
   dailyPick: Record<string, string>;
   totalFeedback: number;
 };
@@ -36,22 +32,6 @@ export function emptyPreferences(): PreferenceState {
     dailyPick: {},
     totalFeedback: 0,
   };
-}
-
-export function loadPreferences(): PreferenceState {
-  if (typeof window === "undefined") return emptyPreferences();
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyPreferences();
-    return { ...emptyPreferences(), ...JSON.parse(raw) };
-  } catch {
-    return emptyPreferences();
-  }
-}
-
-export function savePreferences(state: PreferenceState): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function bump(
@@ -107,7 +87,6 @@ export function applyFeedback(
     next.decadeScores = bump(next.decadeScores, decade, -1.5);
     next.artistScores = bump(next.artistScores, album.artist, -3);
   } else {
-    // skip: mild negative on this exact album, tiny genre nudge away
     next.suggested[album.id] = today;
     for (const g of album.genres) {
       next.genreScores[g] = (next.genreScores[g] ?? 0) - 0.25;
@@ -115,24 +94,6 @@ export function applyFeedback(
   }
 
   return next;
-}
-
-export function markSuggested(
-  state: PreferenceState,
-  albumId: string,
-  dateKey: string,
-): PreferenceState {
-  return {
-    ...state,
-    suggested: {
-      ...state.suggested,
-      [albumId]: new Date().toISOString(),
-    },
-    dailyPick: {
-      ...state.dailyPick,
-      [dateKey]: albumId,
-    },
-  };
 }
 
 export function todayKey(d = new Date()): string {

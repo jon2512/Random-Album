@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import type { Album } from "@/data/albums";
+import ProfilePicker from "@/components/ProfilePicker";
 import {
   appleMusicSearchUrl,
   fetchAlbumMeta,
@@ -10,49 +11,60 @@ import {
 } from "@/lib/links";
 import {
   applyFeedback,
-  loadPreferences,
-  savePreferences,
   todayKey,
   topTasteSummary,
   type PreferenceState,
 } from "@/lib/preferences";
+import {
+  getActiveProfile,
+  loadStore,
+  saveStore,
+  updateActivePreferences,
+  type Profile,
+  type ProfileStore,
+} from "@/lib/profiles";
 import { getStickyOrPick } from "@/lib/recommend";
 
-type Phase = "boot" | "idle" | "revealed";
+type Phase = "boot" | "pick-profile" | "idle" | "revealed";
 
-type AppState = {
-  prefs: PreferenceState;
+function albumPhaseForPrefs(prefs: PreferenceState): {
   album: Album | null;
-  phase: Phase;
-};
-
-function readClientState(): AppState {
-  const loaded = loadPreferences();
+  phase: "idle" | "revealed";
+} {
   const date = todayKey();
-  if (loaded.dailyPick[date]) {
-    const { album } = getStickyOrPick(loaded, date, false);
-    return { prefs: loaded, album, phase: "revealed" };
+  if (prefs.dailyPick[date]) {
+    const { album } = getStickyOrPick(prefs, date, false);
+    return { album, phase: "revealed" };
   }
-  return { prefs: loaded, album: null, phase: "idle" };
+  return { album: null, phase: "idle" };
 }
 
 export default function SpinApp() {
   const [hydrated, setHydrated] = useState(false);
-  const [prefs, setPrefs] = useState<PreferenceState | null>(null);
-  const [album, setAlbum] = useState<Album | null>(null);
+  const [store, setStore] = useState<ProfileStore | null>(null);
   const [phase, setPhase] = useState<Phase>("boot");
+  const [album, setAlbum] = useState<Album | null>(null);
   const [meta, setMeta] = useState<AlbumMeta | null>(null);
   const [metaForId, setMetaForId] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [, startTransition] = useTransition();
 
+  const active: Profile | null = store ? getActiveProfile(store) : null;
+  const prefs = active?.preferences ?? null;
+
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
-      const initial = readClientState();
-      setPrefs(initial.prefs);
-      setAlbum(initial.album);
-      setPhase(initial.phase);
+      const loaded = loadStore();
+      setStore(loaded);
+      const profile = getActiveProfile(loaded);
+      if (!profile) {
+        setPhase("pick-profile");
+      } else {
+        const { album: a, phase: p } = albumPhaseForPrefs(profile.preferences);
+        setAlbum(a);
+        setPhase(p);
+      }
       setHydrated(true);
     });
     return () => cancelAnimationFrame(frame);
@@ -71,9 +83,31 @@ export default function SpinApp() {
     };
   }, [album]);
 
-  function persist(next: PreferenceState) {
-    setPrefs(next);
-    savePreferences(next);
+  function persistStore(next: ProfileStore) {
+    setStore(next);
+    saveStore(next);
+  }
+
+  function persistPrefs(nextPrefs: PreferenceState) {
+    if (!store) return;
+    persistStore(updateActivePreferences(store, nextPrefs));
+  }
+
+  function onStoreChange(next: ProfileStore) {
+    persistStore(next);
+    const profile = getActiveProfile(next);
+    if (!profile) {
+      setAlbum(null);
+      setMeta(null);
+      setMetaForId(null);
+      setPhase("pick-profile");
+      return;
+    }
+    const { album: a, phase: p } = albumPhaseForPrefs(profile.preferences);
+    setAlbum(a);
+    setMeta(null);
+    setMetaForId(null);
+    setPhase(p);
   }
 
   function showFlash(message: string) {
@@ -82,13 +116,13 @@ export default function SpinApp() {
   }
 
   function spin(reshuffle = false) {
-    if (!prefs) return;
+    if (!prefs || !store) return;
     setSpinning(true);
     startTransition(() => {
       window.setTimeout(() => {
         const date = todayKey();
         const result = getStickyOrPick(prefs, date, reshuffle);
-        persist(result.prefs);
+        persistPrefs(result.prefs);
         setAlbum(result.album);
         setPhase("revealed");
         setSpinning(false);
@@ -98,8 +132,7 @@ export default function SpinApp() {
 
   function onListened() {
     if (!prefs || !album) return;
-    const next = applyFeedback(prefs, album, "listened");
-    persist(next);
+    persistPrefs(applyFeedback(prefs, album, "listened"));
     showFlash("Logged — taste updated.");
   }
 
@@ -112,7 +145,7 @@ export default function SpinApp() {
       dailyPick: { ...next.dailyPick },
     };
     delete cleared.dailyPick[date];
-    persist(cleared);
+    persistPrefs(cleared);
     showFlash("Got it — won't push that again.");
     setAlbum(null);
     setMeta(null);
@@ -122,12 +155,11 @@ export default function SpinApp() {
 
   function onSkip() {
     if (!prefs || !album) return;
-    const next = applyFeedback(prefs, album, "skip");
-    persist(next);
+    persistPrefs(applyFeedback(prefs, album, "skip"));
     spin(true);
   }
 
-  if (!hydrated || phase === "boot" || !prefs) {
+  if (!hydrated || phase === "boot" || !store) {
     return (
       <main className="shell">
         <div className="boot">Loading…</div>
@@ -135,7 +167,7 @@ export default function SpinApp() {
     );
   }
 
-  const taste = topTasteSummary(prefs);
+  const taste = prefs ? topTasteSummary(prefs) : "";
   const artwork =
     album && metaForId === album.id ? meta?.artworkUrl ?? null : null;
   const appleUrl =
@@ -148,7 +180,9 @@ export default function SpinApp() {
   const metaLoading = !!album && metaForId !== album.id;
 
   return (
-    <main className={`shell ${phase === "revealed" ? "shell--revealed" : ""}`}>
+    <main
+      className={`shell ${phase === "revealed" ? "shell--revealed" : ""}`}
+    >
       <div className="atmosphere" aria-hidden />
       <div className="grain" aria-hidden />
 
@@ -162,8 +196,34 @@ export default function SpinApp() {
 
       <header className="top">
         <p className="brand">SPIN</p>
-        <p className="taste">{taste}</p>
+        <div className="top-right">
+          {active && phase !== "pick-profile" && (
+            <button
+              type="button"
+              className="profile-chip"
+              onClick={() => {
+                setPhase("pick-profile");
+                setAlbum(null);
+                setMeta(null);
+                setMetaForId(null);
+              }}
+              title="Switch profile"
+            >
+              <span
+                className="profile-chip__dot"
+                style={{ background: active.color }}
+                aria-hidden
+              />
+              {active.name}
+            </button>
+          )}
+          {phase !== "pick-profile" && <p className="taste">{taste}</p>}
+        </div>
       </header>
+
+      {phase === "pick-profile" && (
+        <ProfilePicker store={store} onChange={onStoreChange} />
+      )}
 
       {phase === "idle" && (
         <section className="hero hero--idle">
@@ -186,7 +246,9 @@ export default function SpinApp() {
       )}
 
       {phase === "revealed" && album && (
-        <section className={`hero hero--album ${spinning ? "is-swapping" : ""}`}>
+        <section
+          className={`hero hero--album ${spinning ? "is-swapping" : ""}`}
+        >
           <div className="cover-wrap">
             {artwork ? (
               // eslint-disable-next-line @next/next/no-img-element
