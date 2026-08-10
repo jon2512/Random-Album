@@ -131,10 +131,10 @@ export default function FriendsLikes({
         <button type="button" className="search-back" onClick={onBack}>
           ← Back
         </button>
-        <h1 className="headline headline--search">Friends’ lists</h1>
+        <h1 className="headline headline--search">Their lists</h1>
         <p className="sub">
-          Browse what others liked or passed on. Liking something only trains{" "}
-          <em>your</em> recommendations.
+          Peek at what the others loved or passed on. Liking something only
+          trains <em>your</em> ear.
         </p>
       </div>
 
@@ -163,8 +163,8 @@ export default function FriendsLikes({
         <p className="inspire-empty">Loading friends’ lists…</p>
       ) : lists.length === 0 ? (
         <p className="inspire-empty">
-          No shared likes or dislikes yet. Have friends join the room, create a
-          profile, and spin a few albums.
+          No lists yet. When someone you know joins and likes a few albums,
+          they’ll show up here.
         </p>
       ) : (
         lists.map(({ profile, likes, dislikes }) => {

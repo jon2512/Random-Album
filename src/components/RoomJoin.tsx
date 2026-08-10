@@ -8,21 +8,27 @@ import {
   type JoinResult,
 } from "@/lib/api";
 
+/** Shared invite phrase — music-related, for close friends only. */
+export const CREW_PHRASE = "dusty-needle";
+
 type Props = {
   onJoined: (result: JoinResult, apiUrl: string) => void;
 };
 
 export default function RoomJoin({ onJoined }: Props) {
   const [apiUrl, setApiUrl] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(CREW_PHRASE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [showServer, setShowServer] = useState(false);
+  const [apiFromConfig, setApiFromConfig] = useState(false);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       loadDefaultApiUrl().then((url) => {
         setApiUrl(url);
+        setApiFromConfig(Boolean(url));
         setReady(true);
       });
     });
@@ -34,16 +40,17 @@ export default function RoomJoin({ onJoined }: Props) {
     setError(null);
     setBusy(true);
     try {
+      if (!apiUrl.trim()) {
+        throw new Error("Missing server address.");
+      }
       const ok = await healthCheck(apiUrl);
       if (!ok) {
-        throw new Error(
-          "Can’t reach the SPIN API. Check the URL / Cloudflare Tunnel.",
-        );
+        throw new Error("Can’t reach SPIN right now. Try again in a moment.");
       }
       const result = await joinRoom(apiUrl, code);
       onJoined(result, apiUrl.trim().replace(/\/+$/, ""));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Join failed.");
+      setError(err instanceof Error ? err.message : "Couldn’t get in.");
     } finally {
       setBusy(false);
     }
@@ -57,39 +64,45 @@ export default function RoomJoin({ onJoined }: Props) {
     );
   }
 
+  const hideApi = apiFromConfig && !showServer;
+
   return (
     <section className="hero hero--idle profile-picker">
-      <h1 className="headline">Join your room</h1>
+      <h1 className="headline">Come on in</h1>
       <p className="sub">
-        Same room code for your friends. Each person picks or creates their own
-        name — likes stay private to that profile.
+        Made for a tiny circle. Use the phrase, then pick your name — your taste
+        stays yours.
       </p>
 
       <form className="profile-create room-join" onSubmit={onSubmit}>
-        <label className="profile-label" htmlFor="api-url">
-          API URL (Cloudflare Tunnel)
-        </label>
-        <input
-          id="api-url"
-          className="profile-input"
-          value={apiUrl}
-          onChange={(e) => setApiUrl(e.target.value)}
-          placeholder="https://spin-api.your-tunnel.com"
-          autoComplete="off"
-          required
-        />
+        {!hideApi && (
+          <>
+            <label className="profile-label" htmlFor="api-url">
+              Server
+            </label>
+            <input
+              id="api-url"
+              className="profile-input"
+              value={apiUrl}
+              onChange={(e) => setApiUrl(e.target.value)}
+              placeholder="https://album-spin.win"
+              autoComplete="off"
+              required
+            />
+          </>
+        )}
 
-        <label className="profile-label" htmlFor="room-code">
-          Room code
+        <label className="profile-label" htmlFor="crew-phrase">
+          Phrase
         </label>
         <input
-          id="room-code"
+          id="crew-phrase"
           className="profile-input"
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="e.g. DRIVE-CREW"
+          placeholder={CREW_PHRASE}
           autoComplete="off"
-          autoCapitalize="characters"
+          spellCheck={false}
           required
           minLength={3}
           maxLength={24}
@@ -104,9 +117,19 @@ export default function RoomJoin({ onJoined }: Props) {
         >
           <span className="spin-btn__ring" aria-hidden />
           <span className="spin-btn__label">
-            {busy ? "Joining…" : "Enter room"}
+            {busy ? "Getting in…" : "Let’s go"}
           </span>
         </button>
+
+        {apiFromConfig && (
+          <button
+            type="button"
+            className="text-link text-link--quiet"
+            onClick={() => setShowServer((v) => !v)}
+          >
+            {showServer ? "Hide server" : "Server settings"}
+          </button>
+        )}
       </form>
     </section>
   );

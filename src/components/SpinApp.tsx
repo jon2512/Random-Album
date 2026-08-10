@@ -435,7 +435,7 @@ export default function SpinApp() {
               </button>
             )}
           {session && phase !== "join-room" && (
-            <p className="room-pill">{session.roomCode}</p>
+            <p className="room-pill">{session.roomCode.toLowerCase()}</p>
           )}
           {phase !== "join-room" &&
             phase !== "pick-profile" &&
@@ -485,8 +485,8 @@ export default function SpinApp() {
         <section className="hero hero--idle">
           <h1 className="headline">Your album for the drive.</h1>
           <p className="sub">
-            One suggestion. Your likes stay yours — friends can still peek for
-            inspiration.
+            One quiet suggestion for the drive. Tell it what you love — it
+            learns you, not anyone else.
           </p>
           <button
             type="button"
@@ -504,7 +504,7 @@ export default function SpinApp() {
               Search an album you like
             </button>
             <button type="button" className="text-link" onClick={openInspire}>
-              Friends’ likes & dislikes
+              See what they’re into
             </button>
           </div>
         </section>
@@ -580,7 +580,7 @@ export default function SpinApp() {
               Search an album
             </button>
             <button type="button" className="text-link" onClick={openInspire}>
-              Friends’ lists
+              See what they’re into
             </button>
           </div>
         </section>

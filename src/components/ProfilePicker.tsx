@@ -59,11 +59,11 @@ export default function ProfilePicker({
       <p className="sub">
         {roomCode ? (
           <>
-            Room <strong>{roomCode}</strong> — pick your name, or create one.
-            Your likes only train your recommendations.
+            Pick your name — or make one. Your likes only shape{" "}
+            <em>your</em> next listens.
           </>
         ) : (
-          <>Up to {maxProfiles} drivers. Each profile learns its own taste.</>
+          <>Up to {maxProfiles} people. Each profile learns its own taste.</>
         )}
       </p>
 
@@ -195,7 +195,7 @@ export default function ProfilePicker({
 
       {onLeaveRoom && (
         <button type="button" className="text-link" onClick={onLeaveRoom}>
-          Leave room / change code
+          Not you? Use a different phrase
         </button>
       )}
     </section>
