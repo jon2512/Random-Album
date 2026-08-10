@@ -1,5 +1,6 @@
 import { ALBUMS, decadeOf, type Album } from "@/data/albums";
 import type { PreferenceState } from "@/lib/preferences";
+import type { SpinMode } from "@/lib/modes";
 
 function daysSince(iso: string | undefined): number {
   if (!iso) return Infinity;
@@ -14,7 +15,15 @@ function albumPool(prefs: PreferenceState): Album[] {
   return [...ALBUMS, ...customs.filter((a) => !ids.has(a.id))];
 }
 
-function scoreAlbum(album: Album, prefs: PreferenceState): number {
+export function pickKey(dateKey: string, mode: SpinMode): string {
+  return mode === "any" ? dateKey : `${dateKey}:${mode}`;
+}
+
+function scoreAlbum(
+  album: Album,
+  prefs: PreferenceState,
+  mode: SpinMode,
+): number {
   if (prefs.disliked.includes(album.id)) return -Infinity;
 
   let score = 1;
@@ -29,6 +38,12 @@ function scoreAlbum(album: Album, prefs: PreferenceState): number {
     score += (prefs.decadeScores[decadeOf(album.year)] ?? 0) * 1.0;
   }
   score += (prefs.artistScores[album.artist] ?? 0) * 1.6;
+
+  // Mode steering: prefer matching moods strongly
+  if (mode !== "any") {
+    if (album.moods.includes(mode)) score += 10;
+    else score *= 0.12;
+  }
 
   const suggestedDays = daysSince(prefs.suggested[album.id]);
   if (suggestedDays === Infinity) score += 1.2;
@@ -48,19 +63,31 @@ function scoreAlbum(album: Album, prefs: PreferenceState): number {
 /** Weighted random pick. Excludes forceExclude ids. */
 export function pickAlbum(
   prefs: PreferenceState,
-  options?: { forceExclude?: string[]; rng?: () => number },
+  options?: {
+    forceExclude?: string[];
+    rng?: () => number;
+    mode?: SpinMode;
+  },
 ): Album {
   const rng = options?.rng ?? Math.random;
+  const mode = options?.mode ?? "any";
   const exclude = new Set([
     ...(options?.forceExclude ?? []),
     ...prefs.disliked,
   ]);
 
   const all = albumPool(prefs);
-  const candidates = all.filter((a) => !exclude.has(a.id));
+  let candidates = all.filter((a) => !exclude.has(a.id));
+
+  // Prefer a mood-matching pool when possible
+  if (mode !== "any") {
+    const matched = candidates.filter((a) => a.moods.includes(mode));
+    if (matched.length >= 3) candidates = matched;
+  }
+
   const pool = candidates.length > 0 ? candidates : all;
 
-  const weights = pool.map((a) => scoreAlbum(a, prefs));
+  const weights = pool.map((a) => scoreAlbum(a, prefs, mode));
   const total = weights.reduce((s, w) => s + Math.max(w, 0), 0);
 
   if (total <= 0) {
@@ -79,28 +106,33 @@ export function getStickyOrPick(
   prefs: PreferenceState,
   dateKey: string,
   reshuffle = false,
+  mode: SpinMode = "any",
 ): { album: Album; prefs: PreferenceState; isNew: boolean } {
-  if (!reshuffle && prefs.dailyPick[dateKey]) {
-    const existing = albumPool(prefs).find(
-      (a) => a.id === prefs.dailyPick[dateKey],
-    );
+  const key = pickKey(dateKey, mode);
+
+  if (!reshuffle && prefs.dailyPick[key]) {
+    const existing = albumPool(prefs).find((a) => a.id === prefs.dailyPick[key]);
     if (existing && !prefs.disliked.includes(existing.id)) {
-      return { album: existing, prefs, isNew: false };
+      // If mode is set, sticky album should still roughly fit
+      if (mode === "any" || existing.moods.includes(mode)) {
+        return { album: existing, prefs, isNew: false };
+      }
     }
   }
 
   const exclude =
-    reshuffle && prefs.dailyPick[dateKey] ? [prefs.dailyPick[dateKey]] : [];
-  const album = pickAlbum(prefs, { forceExclude: exclude });
+    reshuffle && prefs.dailyPick[key] ? [prefs.dailyPick[key]] : [];
+  const album = pickAlbum(prefs, { forceExclude: exclude, mode });
   const nextPrefs = {
     ...prefs,
+    activeMode: mode,
     suggested: {
       ...prefs.suggested,
       [album.id]: new Date().toISOString(),
     },
     dailyPick: {
       ...prefs.dailyPick,
-      [dateKey]: album.id,
+      [key]: album.id,
     },
   };
   return { album, prefs: nextPrefs, isNew: true };

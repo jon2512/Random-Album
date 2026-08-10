@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import type { Album } from "@/data/albums";
 import AlbumSearch from "@/components/AlbumSearch";
 import FriendsLikes from "@/components/FriendsLikes";
+import ModeSelector from "@/components/ModeSelector";
 import ProfilePicker from "@/components/ProfilePicker";
 import RoomJoin from "@/components/RoomJoin";
 import {
@@ -31,6 +32,7 @@ import {
   inspirationToLists,
   type ProfileLikedList,
 } from "@/lib/likes";
+import { isSpinMode, modeLabel, type SpinMode } from "@/lib/modes";
 import {
   applyFeedback,
   rememberAlbum,
@@ -44,7 +46,7 @@ import {
   type Profile,
   type ProfileStore,
 } from "@/lib/profiles";
-import { getStickyOrPick } from "@/lib/recommend";
+import { getStickyOrPick, pickKey } from "@/lib/recommend";
 import type { SearchHit } from "@/lib/search";
 
 type Phase =
@@ -56,13 +58,19 @@ type Phase =
   | "search"
   | "inspire";
 
+function currentMode(prefs: PreferenceState): SpinMode {
+  return isSpinMode(prefs.activeMode) ? prefs.activeMode : "any";
+}
+
 function albumPhaseForPrefs(prefs: PreferenceState): {
   album: Album | null;
   phase: "idle" | "revealed";
 } {
   const date = todayKey();
-  if (prefs.dailyPick[date]) {
-    const { album } = getStickyOrPick(prefs, date, false);
+  const mode = currentMode(prefs);
+  const key = pickKey(date, mode);
+  if (prefs.dailyPick[key]) {
+    const { album } = getStickyOrPick(prefs, date, false, mode);
     return { album, phase: "revealed" };
   }
   return { album: null, phase: "idle" };
@@ -307,13 +315,14 @@ export default function SpinApp() {
     else setPhase("idle");
   }
 
-  function spin(reshuffle = false) {
+  function spin(reshuffle = false, modeOverride?: SpinMode) {
     if (!prefs) return;
+    const mode = modeOverride ?? currentMode(prefs);
     setSpinning(true);
     startTransition(() => {
       window.setTimeout(() => {
         const date = todayKey();
-        const result = getStickyOrPick(prefs, date, reshuffle);
+        const result = getStickyOrPick(prefs, date, reshuffle, mode);
         setLocalPrefs(result.prefs);
         setAlbum(result.album);
         setPhase("revealed");
@@ -321,6 +330,19 @@ export default function SpinApp() {
         setSpinning(false);
       }, 650);
     });
+  }
+
+  function onModeChange(mode: SpinMode) {
+    if (!prefs) return;
+    if (currentMode(prefs) === mode) return;
+    const next = { ...prefs, activeMode: mode };
+    setLocalPrefs(next);
+    // Switching mode goes back to idle so they can spin for that mood
+    setAlbum(null);
+    setMeta(null);
+    setMetaForId(null);
+    setPhase("idle");
+    setReturnPhase("idle");
   }
 
   function onListened() {
@@ -331,10 +353,12 @@ export default function SpinApp() {
 
   function onDislike() {
     if (!prefs || !album) return;
+    const mode = currentMode(prefs);
     const next = applyFeedback(prefs, album, "dislike");
     const date = todayKey();
+    const key = pickKey(date, mode);
     const cleared = { ...next, dailyPick: { ...next.dailyPick } };
-    delete cleared.dailyPick[date];
+    delete cleared.dailyPick[key];
     setLocalPrefs(cleared);
     showFlash("Got it — won't push that again.");
     setAlbum(null);
@@ -395,6 +419,7 @@ export default function SpinApp() {
   const metaLoading = !!album && metaForId !== album.id;
   const likedIds = new Set(Object.keys(prefs?.liked ?? {}));
   const dislikedIds = new Set(prefs?.disliked ?? []);
+  const mode: SpinMode = prefs ? currentMode(prefs) : "any";
 
   return (
     <main className={`shell ${phase === "revealed" ? "shell--revealed" : ""}`}>
@@ -485,9 +510,13 @@ export default function SpinApp() {
         <section className="hero hero--idle">
           <h1 className="headline">Your album for the drive.</h1>
           <p className="sub">
-            One quiet suggestion for the drive. Tell it what you love — it
-            learns you, not anyone else.
+            Pick a mode, then spin. It learns what you love in each mood.
           </p>
+          <ModeSelector
+            value={mode}
+            onChange={onModeChange}
+            disabled={spinning}
+          />
           <button
             type="button"
             className={`spin-btn ${spinning ? "is-spinning" : ""}`}
@@ -496,7 +525,11 @@ export default function SpinApp() {
           >
             <span className="spin-btn__ring" aria-hidden />
             <span className="spin-btn__label">
-              {spinning ? "Finding…" : "Spin today’s album"}
+              {spinning
+                ? "Finding…"
+                : mode === "any"
+                  ? "Spin today’s album"
+                  : `Spin ${modeLabel(mode).toLowerCase()}`}
             </span>
           </button>
           <div className="idle-links">
@@ -541,8 +574,20 @@ export default function SpinApp() {
               {album.year > 0 ? album.year : "—"}
               <span aria-hidden> · </span>
               {album.genres.slice(0, 2).join(" / ") || "album"}
+              {mode !== "any" && (
+                <>
+                  <span aria-hidden> · </span>
+                  {modeLabel(mode)}
+                </>
+              )}
             </p>
           </div>
+
+          <ModeSelector
+            value={mode}
+            onChange={onModeChange}
+            disabled={spinning}
+          />
 
           <div className="listen-links">
             <a

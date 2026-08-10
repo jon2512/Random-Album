@@ -24,6 +24,7 @@ const emptyPreferences = () => ({
   dailyPick: {},
   totalFeedback: 0,
   customAlbums: [],
+  activeMode: "any",
 });
 
 function ensureDir(dir) {

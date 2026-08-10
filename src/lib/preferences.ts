@@ -19,6 +19,8 @@ export type PreferenceState = {
   totalFeedback: number;
   /** Albums liked via search that aren't in the curated catalog */
   customAlbums: Album[];
+  /** Last selected listening mode for this profile */
+  activeMode?: import("@/lib/modes").SpinMode;
 };
 
 export function emptyPreferences(): PreferenceState {
@@ -34,6 +36,7 @@ export function emptyPreferences(): PreferenceState {
     dailyPick: {},
     totalFeedback: 0,
     customAlbums: [],
+    activeMode: "any",
   };
 }
 
