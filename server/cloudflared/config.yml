@@ -1,0 +1,10 @@
+# Optional: named tunnel config if you use a credentials JSON file instead of TUNNEL_TOKEN.
+# Most Synology setups should use the TUNNEL_TOKEN method in docker-compose.yml instead.
+
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: api.album-spin.win
+    service: http://172.17.0.1:8787
+  - service: http_status:404

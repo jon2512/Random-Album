@@ -1,0 +1,85 @@
+Cloudflare Tunnel setup for album-spin.win
+==========================================
+
+Goal:
+  https://api.album-spin.win  →  SPIN API on your NAS (port 8787)
+
+------------------------------------------------
+A. Cloudflare dashboard (once)
+------------------------------------------------
+1. Add album-spin.win to Cloudflare (if not already):
+   https://dash.cloudflare.com → Add a site → album-spin.win
+   Point the domain's nameservers to Cloudflare when asked.
+
+2. Open Zero Trust:
+   https://one.dash.cloudflare.com
+   (Free Zero Trust plan is enough)
+
+3. Create a tunnel:
+   Networks → Tunnels → Create a tunnel
+   - Type: Cloudflared
+   - Name: spin-nas
+   - Save tunnel
+
+4. Copy the install token
+   On the "Install connector" screen, copy the long token
+   (looks like: eyJhIjoi....)
+
+5. Public hostname for the tunnel:
+   - Subdomain: api
+   - Domain: album-spin.win
+   - Service type: HTTP
+   - URL: http://172.17.0.1:8787
+     (that reaches the NAS Docker bridge → host port 8787)
+   Save.
+
+   If 172.17.0.1 fails later, try:
+     http://host.docker.internal:8787
+   or the NAS LAN IP, e.g. http://192.168.x.x:8787
+
+------------------------------------------------
+B. On the NAS (SSH)
+------------------------------------------------
+1. Make sure spin-api is already running:
+   curl http://127.0.0.1:8787/health
+
+2. Create the tunnel folder and start cloudflared:
+
+   mkdir -p /volume1/docker/spin-cloudflared
+   cd /volume1/docker/spin-cloudflared
+
+   # create docker-compose.yml (contents from this package)
+   # then:
+
+   echo 'TUNNEL_TOKEN=PASTE_YOUR_TOKEN_HERE' > .env
+
+   docker-compose up -d
+   # or if that fails:
+   docker run -d \
+     --name spin-cloudflared \
+     --restart unless-stopped \
+     -e TUNNEL_TOKEN='PASTE_YOUR_TOKEN_HERE' \
+     cloudflare/cloudflared:latest \
+     tunnel --no-autoupdate run
+
+3. Check the tunnel is healthy in Cloudflare → Tunnels (status: Healthy)
+
+4. Test from your phone (not on Wi‑Fi optional):
+   https://api.album-spin.win/health
+
+------------------------------------------------
+C. Point SPIN website at the API
+------------------------------------------------
+On the join screen, use:
+  API URL: https://api.album-spin.win
+  Room code: e.g. DRIVE-CREW
+
+Or set public/config.json before deploying Pages:
+  { "apiUrl": "https://api.album-spin.win" }
+
+------------------------------------------------
+Notes
+------------------------------------------------
+- No ports need to be opened on your router
+- Free Cloudflare tunnel is fine for a few friends
+- Keep spin-api running; cloudflared only forwards traffic to it

@@ -1,0 +1,17 @@
+# Cloudflare Tunnel for SPIN API on Synology
+# Domain: album-spin.win
+# Public URL: https://api.album-spin.win  →  http://spin-api:8787
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: spin-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # Paste the token from Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Install connector
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    # If spin-api is on the same Docker host/network, you can also reach it via host gateway:
+    # Or use host network mode on Synology if container DNS to spin-api is awkward.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
