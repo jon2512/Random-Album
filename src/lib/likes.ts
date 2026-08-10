@@ -1,6 +1,7 @@
 import { ALBUMS, getAlbumById, type Album } from "@/data/albums";
 import type { PreferenceState } from "@/lib/preferences";
 import type { Profile, ProfileStore } from "@/lib/profiles";
+import type { InspirationProfile } from "@/lib/api";
 
 export type LikedAlbumEntry = {
   album: Album;
@@ -9,13 +10,14 @@ export type LikedAlbumEntry = {
 };
 
 export type ProfileLikedList = {
-  profile: Profile;
-  entries: LikedAlbumEntry[];
+  profile: Pick<Profile, "id" | "name" | "color">;
+  likes: LikedAlbumEntry[];
+  dislikes: Album[];
 };
 
 function resolveAlbum(
   id: string,
-  prefs: PreferenceState,
+  prefs: Pick<PreferenceState, "customAlbums">,
   extras: Album[] = [],
 ): Album | undefined {
   const fromCatalog = getAlbumById(id);
@@ -25,7 +27,6 @@ function resolveAlbum(
   return extras.find((a) => a.id === id);
 }
 
-/** Liked albums for one profile, newest / strongest first. */
 export function likedAlbumsForProfile(
   profile: Profile,
   extras: Album[] = [],
@@ -52,7 +53,16 @@ export function likedAlbumsForProfile(
   });
 }
 
-/** Other drivers' likes for cross-inspiration. */
+export function dislikedAlbumsForProfile(
+  profile: Profile,
+  extras: Album[] = [],
+): Album[] {
+  const prefs = profile.preferences;
+  return (prefs.disliked ?? [])
+    .map((id) => resolveAlbum(id, prefs, extras))
+    .filter((a): a is Album => !!a);
+}
+
 export function otherProfilesLikedLists(
   store: ProfileStore,
   activeId: string | null,
@@ -66,7 +76,50 @@ export function otherProfilesLikedLists(
     .filter((p) => p.id !== activeId)
     .map((profile) => ({
       profile,
-      entries: likedAlbumsForProfile(profile, poolExtras),
+      likes: likedAlbumsForProfile(profile, poolExtras),
+      dislikes: dislikedAlbumsForProfile(profile, poolExtras),
     }))
-    .filter((list) => list.entries.length > 0);
+    .filter((list) => list.likes.length > 0 || list.dislikes.length > 0);
+}
+
+/** Build inspiration lists from remote API payload. */
+export function inspirationToLists(
+  profiles: InspirationProfile[],
+): ProfileLikedList[] {
+  return profiles
+    .map((p) => {
+      const fakePrefs = {
+        customAlbums: p.customAlbums ?? [],
+      };
+      const extras = [...ALBUMS, ...(p.customAlbums ?? [])];
+      const likes: LikedAlbumEntry[] = Object.entries(p.liked || {})
+        .filter(([, score]) => score > 0)
+        .flatMap(([id, score]) => {
+          const album = resolveAlbum(id, fakePrefs, extras);
+          if (!album) return [];
+          const entry: LikedAlbumEntry = {
+            album,
+            likedAt: p.listened?.[id] ?? null,
+            score,
+          };
+          return [entry];
+        })
+        .sort((a, b) => {
+          const ta = a.likedAt ? Date.parse(a.likedAt) : 0;
+          const tb = b.likedAt ? Date.parse(b.likedAt) : 0;
+          if (tb !== ta) return tb - ta;
+          return b.score - a.score;
+        });
+
+      const dislikes = (p.disliked || [])
+        .map((id) => resolveAlbum(id, fakePrefs, extras))
+        .filter((a): a is Album => !!a);
+
+      return {
+        profile: { id: p.id, name: p.name, color: p.color },
+        likes,
+        dislikes,
+      };
+    })
+    .filter((list) => list.likes.length > 0 || list.dislikes.length > 0);
 }

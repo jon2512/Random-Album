@@ -134,6 +134,57 @@ a {
   color: var(--fog-dim);
 }
 
+.room-pill {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+  opacity: 0.9;
+}
+
+.form-error {
+  margin: 0;
+  color: #f0b0a6;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.room-join {
+  gap: 0.55rem;
+}
+
+.inspire-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin: 0.25rem 0 0.35rem;
+}
+
+.inspire-tab {
+  border: 1px solid rgba(232, 243, 245, 0.18);
+  background: rgba(7, 22, 26, 0.4);
+  color: var(--fog-dim);
+  font-family: var(--font-body);
+  font-weight: 650;
+  font-size: 0.9rem;
+  padding: 0.7rem;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.inspire-tab.is-active {
+  border-color: rgba(240, 162, 2, 0.55);
+  background: rgba(240, 162, 2, 0.16);
+  color: #ffd27a;
+}
+
+.inspire-empty--nested {
+  margin-top: 0;
+  font-size: 0.9rem;
+}
+
 .top-right {
   display: flex;
   flex-direction: column;

@@ -5,7 +5,7 @@ import {
 } from "@/lib/preferences";
 
 const STORE_KEY = "spin-profiles-v1";
-export const MAX_PROFILES = 4;
+export const MAX_PROFILES = 8;
 
 export const PROFILE_COLORS = [
   "#f0a202",

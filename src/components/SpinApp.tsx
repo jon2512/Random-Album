@@ -1,16 +1,36 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { Album } from "@/data/albums";
 import AlbumSearch from "@/components/AlbumSearch";
 import FriendsLikes from "@/components/FriendsLikes";
 import ProfilePicker from "@/components/ProfilePicker";
+import RoomJoin from "@/components/RoomJoin";
+import {
+  clearSession,
+  createRemoteProfile,
+  deleteRemoteProfile,
+  fetchInspiration,
+  fetchProfiles,
+  loadActiveProfileId,
+  loadSession,
+  renameRemoteProfile,
+  saveActiveProfileId,
+  syncPreferences,
+  type InspirationProfile,
+  type JoinResult,
+  type RoomSession,
+} from "@/lib/api";
 import {
   appleMusicSearchUrl,
   fetchAlbumMeta,
   spotifySearchUrl,
   type AlbumMeta,
 } from "@/lib/links";
+import {
+  inspirationToLists,
+  type ProfileLikedList,
+} from "@/lib/likes";
 import {
   applyFeedback,
   rememberAlbum,
@@ -19,19 +39,17 @@ import {
   type PreferenceState,
 } from "@/lib/preferences";
 import {
+  emptyStore,
   getActiveProfile,
-  loadStore,
-  saveStore,
-  updateActivePreferences,
   type Profile,
   type ProfileStore,
 } from "@/lib/profiles";
 import { getStickyOrPick } from "@/lib/recommend";
-import { otherProfilesLikedLists } from "@/lib/likes";
 import type { SearchHit } from "@/lib/search";
 
 type Phase =
   | "boot"
+  | "join-room"
   | "pick-profile"
   | "idle"
   | "revealed"
@@ -52,7 +70,9 @@ function albumPhaseForPrefs(prefs: PreferenceState): {
 
 export default function SpinApp() {
   const [hydrated, setHydrated] = useState(false);
-  const [store, setStore] = useState<ProfileStore | null>(null);
+  const [session, setSession] = useState<RoomSession | null>(null);
+  const [store, setStore] = useState<ProfileStore>(emptyStore());
+  const [maxProfiles, setMaxProfiles] = useState(8);
   const [phase, setPhase] = useState<Phase>("boot");
   const [returnPhase, setReturnPhase] = useState<"idle" | "revealed">("idle");
   const [album, setAlbum] = useState<Album | null>(null);
@@ -60,25 +80,51 @@ export default function SpinApp() {
   const [metaForId, setMetaForId] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [inspireLists, setInspireLists] = useState<ProfileLikedList[]>([]);
+  const [inspireLoading, setInspireLoading] = useState(false);
   const [, startTransition] = useTransition();
+  const syncTimer = useRef<number | null>(null);
 
-  const active: Profile | null = store ? getActiveProfile(store) : null;
+  const active: Profile | null = getActiveProfile(store);
   const prefs = active?.preferences ?? null;
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
-      const loaded = loadStore();
-      setStore(loaded);
-      const profile = getActiveProfile(loaded);
-      if (!profile) {
-        setPhase("pick-profile");
-      } else {
-        const { album: a, phase: p } = albumPhaseForPrefs(profile.preferences);
-        setAlbum(a);
-        setPhase(p);
-        setReturnPhase(p);
+      const existing = loadSession();
+      if (!existing) {
+        setPhase("join-room");
+        setHydrated(true);
+        return;
       }
-      setHydrated(true);
+      setSession(existing);
+      fetchProfiles(existing)
+        .then((profiles) => {
+          const activeId = loadActiveProfileId();
+          const validActive =
+            activeId && profiles.some((p) => p.id === activeId)
+              ? activeId
+              : null;
+          setStore({ activeId: validActive, profiles });
+          if (!validActive) {
+            setPhase("pick-profile");
+          } else {
+            const profile = profiles.find((p) => p.id === validActive)!;
+            const { album: a, phase: p } = albumPhaseForPrefs(
+              profile.preferences,
+            );
+            setAlbum(a);
+            setPhase(p);
+            setReturnPhase(p);
+          }
+        })
+        .catch(() => {
+          clearSession();
+          setSession(null);
+          setPhase("join-room");
+        })
+        .finally(() => setHydrated(true));
     });
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -96,37 +142,140 @@ export default function SpinApp() {
     };
   }, [album]);
 
-  function persistStore(next: ProfileStore) {
-    setStore(next);
-    saveStore(next);
+  function showFlash(message: string) {
+    setFlash(message);
+    window.setTimeout(() => setFlash(null), 2200);
   }
 
-  function persistPrefs(nextPrefs: PreferenceState) {
-    if (!store) return;
-    persistStore(updateActivePreferences(store, nextPrefs));
+  function queueSync(profileId: string, preferences: PreferenceState) {
+    if (!session) return;
+    if (syncTimer.current) window.clearTimeout(syncTimer.current);
+    syncTimer.current = window.setTimeout(() => {
+      syncPreferences(session, profileId, preferences).catch(() => {
+        showFlash("Couldn’t sync to NAS — will retry on next change.");
+      });
+    }, 350);
   }
 
-  function onStoreChange(next: ProfileStore) {
-    persistStore(next);
-    const profile = getActiveProfile(next);
-    if (!profile) {
-      setAlbum(null);
-      setMeta(null);
-      setMetaForId(null);
-      setPhase("pick-profile");
-      return;
-    }
+  function setLocalPrefs(nextPrefs: PreferenceState) {
+    if (!store.activeId) return;
+    setStore((prev) => ({
+      ...prev,
+      profiles: prev.profiles.map((p) =>
+        p.id === prev.activeId ? { ...p, preferences: nextPrefs } : p,
+      ),
+    }));
+    queueSync(store.activeId, nextPrefs);
+  }
+
+  function enterWithProfile(profile: Profile, profiles: Profile[]) {
+    saveActiveProfileId(profile.id);
+    setStore({ activeId: profile.id, profiles });
     const { album: a, phase: p } = albumPhaseForPrefs(profile.preferences);
     setAlbum(a);
     setMeta(null);
     setMetaForId(null);
     setPhase(p);
     setReturnPhase(p);
+    setError(null);
   }
 
-  function showFlash(message: string) {
-    setFlash(message);
-    window.setTimeout(() => setFlash(null), 2200);
+  function onJoined(result: JoinResult, apiUrl: string) {
+    const nextSession = { apiUrl, roomCode: result.code };
+    setSession(nextSession);
+    setMaxProfiles(result.maxProfiles);
+    setStore({ activeId: null, profiles: result.profiles });
+    saveActiveProfileId(null);
+    setPhase("pick-profile");
+  }
+
+  async function refreshProfiles(activeId?: string | null) {
+    if (!session) return;
+    const profiles = await fetchProfiles(session);
+    const id = activeId === undefined ? store.activeId : activeId;
+    const valid = id && profiles.some((p) => p.id === id) ? id : null;
+    setStore({ activeId: valid, profiles });
+    return { profiles, activeId: valid };
+  }
+
+  async function onSelectProfile(id: string) {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const profiles = await fetchProfiles(session);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) throw new Error("Profile not found.");
+      enterWithProfile(profile, profiles);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t select profile.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCreateProfile(name: string) {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createRemoteProfile(session, name);
+      const profiles = await fetchProfiles(session);
+      enterWithProfile(
+        profiles.find((p) => p.id === created.id) ?? created,
+        profiles,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t create profile.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRenameProfile(id: string, name: string) {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await renameRemoteProfile(session, id, name);
+      await refreshProfiles(store.activeId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t rename.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeleteProfile(id: string) {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteRemoteProfile(session, id);
+      if (store.activeId === id) saveActiveProfileId(null);
+      const { profiles, activeId } = (await refreshProfiles(
+        store.activeId === id ? null : store.activeId,
+      ))!;
+      if (!activeId) {
+        setAlbum(null);
+        setPhase("pick-profile");
+      } else {
+        const profile = profiles.find((p) => p.id === activeId)!;
+        enterWithProfile(profile, profiles);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t delete.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function leaveRoom() {
+    clearSession();
+    setSession(null);
+    setStore(emptyStore());
+    setAlbum(null);
+    setPhase("join-room");
   }
 
   function openSearch() {
@@ -134,31 +283,38 @@ export default function SpinApp() {
     setPhase("search");
   }
 
-  function openInspire() {
+  async function openInspire() {
     setReturnPhase(phase === "revealed" ? "revealed" : "idle");
     setPhase("inspire");
-  }
-
-  function closeOverlay() {
-    if (returnPhase === "revealed" && album) {
-      setPhase("revealed");
-    } else {
-      setPhase("idle");
+    if (!session) return;
+    setInspireLoading(true);
+    try {
+      const remote: InspirationProfile[] = await fetchInspiration(
+        session,
+        store.activeId,
+      );
+      setInspireLists(inspirationToLists(remote));
+    } catch {
+      setInspireLists([]);
+      showFlash("Couldn’t load friends’ lists.");
+    } finally {
+      setInspireLoading(false);
     }
   }
 
-  function closeSearch() {
-    closeOverlay();
+  function closeOverlay() {
+    if (returnPhase === "revealed" && album) setPhase("revealed");
+    else setPhase("idle");
   }
 
   function spin(reshuffle = false) {
-    if (!prefs || !store) return;
+    if (!prefs) return;
     setSpinning(true);
     startTransition(() => {
       window.setTimeout(() => {
         const date = todayKey();
         const result = getStickyOrPick(prefs, date, reshuffle);
-        persistPrefs(result.prefs);
+        setLocalPrefs(result.prefs);
         setAlbum(result.album);
         setPhase("revealed");
         setReturnPhase("revealed");
@@ -169,7 +325,7 @@ export default function SpinApp() {
 
   function onListened() {
     if (!prefs || !album) return;
-    persistPrefs(applyFeedback(prefs, album, "listened"));
+    setLocalPrefs(applyFeedback(prefs, album, "listened"));
     showFlash("Logged — taste updated.");
   }
 
@@ -177,12 +333,9 @@ export default function SpinApp() {
     if (!prefs || !album) return;
     const next = applyFeedback(prefs, album, "dislike");
     const date = todayKey();
-    const cleared = {
-      ...next,
-      dailyPick: { ...next.dailyPick },
-    };
+    const cleared = { ...next, dailyPick: { ...next.dailyPick } };
     delete cleared.dailyPick[date];
-    persistPrefs(cleared);
+    setLocalPrefs(cleared);
     showFlash("Got it — won't push that again.");
     setAlbum(null);
     setMeta(null);
@@ -193,7 +346,7 @@ export default function SpinApp() {
 
   function onSkip() {
     if (!prefs || !album) return;
-    persistPrefs(applyFeedback(prefs, album, "skip"));
+    setLocalPrefs(applyFeedback(prefs, album, "skip"));
     spin(true);
   }
 
@@ -201,7 +354,7 @@ export default function SpinApp() {
     if (!prefs) return;
     let next = rememberAlbum(prefs, hit.album);
     next = applyFeedback(next, hit.album, "listened");
-    persistPrefs(next);
+    setLocalPrefs(next);
     showFlash(`Liked ${hit.album.title}.`);
   }
 
@@ -209,7 +362,7 @@ export default function SpinApp() {
     if (!prefs) return;
     let next = rememberAlbum(prefs, hit.album);
     next = applyFeedback(next, hit.album, "dislike");
-    persistPrefs(next);
+    setLocalPrefs(next);
     showFlash("Noted — steering away.");
   }
 
@@ -217,11 +370,11 @@ export default function SpinApp() {
     if (!prefs) return;
     let next = rememberAlbum(prefs, albumToLike);
     next = applyFeedback(next, albumToLike, "listened");
-    persistPrefs(next);
+    setLocalPrefs(next);
     showFlash(`Liked ${albumToLike.title}.`);
   }
 
-  if (!hydrated || phase === "boot" || !store) {
+  if (!hydrated || phase === "boot") {
     return (
       <main className="shell">
         <div className="boot">Loading…</div>
@@ -241,11 +394,10 @@ export default function SpinApp() {
   const spotifyUrl = album ? spotifySearchUrl(album) : "#";
   const metaLoading = !!album && metaForId !== album.id;
   const likedIds = new Set(Object.keys(prefs?.liked ?? {}));
+  const dislikedIds = new Set(prefs?.disliked ?? []);
 
   return (
-    <main
-      className={`shell ${phase === "revealed" ? "shell--revealed" : ""}`}
-    >
+    <main className={`shell ${phase === "revealed" ? "shell--revealed" : ""}`}>
       <div className="atmosphere" aria-hidden />
       <div className="grain" aria-hidden />
 
@@ -260,51 +412,72 @@ export default function SpinApp() {
       <header className="top">
         <p className="brand">SPIN</p>
         <div className="top-right">
-          {active && phase !== "pick-profile" && (
-            <button
-              type="button"
-              className="profile-chip"
-              onClick={() => {
-                setPhase("pick-profile");
-                setAlbum(null);
-                setMeta(null);
-                setMetaForId(null);
-              }}
-              title="Switch profile"
-            >
-              <span
-                className="profile-chip__dot"
-                style={{ background: active.color }}
-                aria-hidden
-              />
-              {active.name}
-            </button>
+          {active &&
+            phase !== "join-room" &&
+            phase !== "pick-profile" && (
+              <button
+                type="button"
+                className="profile-chip"
+                onClick={() => {
+                  setPhase("pick-profile");
+                  setAlbum(null);
+                  setMeta(null);
+                  setMetaForId(null);
+                }}
+                title="Switch profile"
+              >
+                <span
+                  className="profile-chip__dot"
+                  style={{ background: active.color }}
+                  aria-hidden
+                />
+                {active.name}
+              </button>
+            )}
+          {session && phase !== "join-room" && (
+            <p className="room-pill">{session.roomCode}</p>
           )}
-          {phase !== "pick-profile" &&
+          {phase !== "join-room" &&
+            phase !== "pick-profile" &&
             phase !== "search" &&
             phase !== "inspire" && <p className="taste">{taste}</p>}
         </div>
       </header>
 
+      {phase === "join-room" && <RoomJoin onJoined={onJoined} />}
+
       {phase === "pick-profile" && (
-        <ProfilePicker store={store} onChange={onStoreChange} />
+        <ProfilePicker
+          store={store}
+          roomCode={session?.roomCode}
+          maxProfiles={maxProfiles}
+          busy={busy}
+          error={error}
+          onSelect={onSelectProfile}
+          onCreate={onCreateProfile}
+          onRename={onRenameProfile}
+          onDelete={onDeleteProfile}
+          onLeaveRoom={leaveRoom}
+        />
       )}
 
       {phase === "search" && (
         <AlbumSearch
           onLike={onSearchLike}
           onDislike={onSearchDislike}
-          onBack={closeSearch}
+          onBack={closeOverlay}
           likedIds={likedIds}
         />
       )}
 
       {phase === "inspire" && (
         <FriendsLikes
-          lists={otherProfilesLikedLists(store, active?.id ?? null)}
+          lists={inspireLists}
           myLikedIds={likedIds}
+          myDislikedIds={dislikedIds}
           onLike={onFriendLike}
           onBack={closeOverlay}
+          loading={inspireLoading}
         />
       )}
 
@@ -312,7 +485,8 @@ export default function SpinApp() {
         <section className="hero hero--idle">
           <h1 className="headline">Your album for the drive.</h1>
           <p className="sub">
-            One suggestion. Tell it what you liked — it learns for tomorrow.
+            One suggestion. Your likes stay yours — friends can still peek for
+            inspiration.
           </p>
           <button
             type="button"
@@ -330,7 +504,7 @@ export default function SpinApp() {
               Search an album you like
             </button>
             <button type="button" className="text-link" onClick={openInspire}>
-              See other drivers’ likes
+              Friends’ likes & dislikes
             </button>
           </div>
         </section>
@@ -406,7 +580,7 @@ export default function SpinApp() {
               Search an album
             </button>
             <button type="button" className="text-link" onClick={openInspire}>
-              Other drivers’ likes
+              Friends’ lists
             </button>
           </div>
         </section>
