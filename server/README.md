@@ -19,6 +19,10 @@ docker compose up -d --build
 Optional env in `docker-compose.yml`:
 
 - `SPIN_MAX_PROFILES` — default `8`
+- `GEMINI_API_KEY` — free key from [Google AI Studio](https://aistudio.google.com/apikey). When set, liking a **new** album refreshes ~24 AI suggestions into that profile’s spin pool (not on every spin).
+- `GEMINI_MODEL` — default `gemini-2.5-flash`
+
+`GET /health` reports `"gemini": true` when the key is present.
 
 ## 2. Expose it with Cloudflare Tunnel (free)
 

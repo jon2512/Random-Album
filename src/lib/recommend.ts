@@ -10,9 +10,18 @@ function daysSince(iso: string | undefined): number {
 
 function albumPool(prefs: PreferenceState): Album[] {
   const customs = prefs.customAlbums ?? [];
-  if (customs.length === 0) return ALBUMS;
-  const ids = new Set(ALBUMS.map((a) => a.id));
-  return [...ALBUMS, ...customs.filter((a) => !ids.has(a.id))];
+  const ai = prefs.aiAlbums ?? [];
+  const byId = new Map<string, Album>();
+  for (const a of ALBUMS) byId.set(a.id, a);
+  for (const a of customs) if (!byId.has(a.id)) byId.set(a.id, a);
+  for (const a of ai) if (!byId.has(a.id)) byId.set(a.id, a);
+  return [...byId.values()];
+}
+
+function recentSuggestedIds(prefs: PreferenceState, withinDays: number): string[] {
+  return Object.entries(prefs.suggested ?? {})
+    .filter(([, iso]) => daysSince(iso) < withinDays)
+    .map(([id]) => id);
 }
 
 export function pickKey(dateKey: string, mode: SpinMode): string {
@@ -27,6 +36,7 @@ function scoreAlbum(
   if (prefs.disliked.includes(album.id)) return -Infinity;
 
   let score = 1;
+  const fromAi = (prefs.aiAlbums ?? []).some((a) => a.id === album.id);
 
   for (const g of album.genres) {
     score += (prefs.genreScores[g] ?? 0) * 1.4;
@@ -46,18 +56,23 @@ function scoreAlbum(
   }
 
   const suggestedDays = daysSince(prefs.suggested[album.id]);
-  if (suggestedDays === Infinity) score += 1.2;
-  else if (suggestedDays < 14) score -= (14 - suggestedDays) * 0.35;
+  if (suggestedDays === Infinity) score += fromAi ? 6 : 1.8;
+  else if (suggestedDays < 45) score -= (45 - suggestedDays) * 0.55;
+  if (suggestedDays < 7) score *= 0.08;
 
   const listenedDays = daysSince(prefs.listened[album.id]);
-  if (listenedDays < 30) score -= (30 - listenedDays) * 0.25;
+  if (listenedDays < 45) score -= (45 - listenedDays) * 0.35;
+  if (listenedDays < 14) score *= 0.15;
 
   if ((prefs.liked[album.id] ?? 0) > 0 && listenedDays > 60) {
     score += 0.8;
   }
 
+  // Prefer fresh AI suggestions so spins don't stay stuck in the curated set
+  if (fromAi && suggestedDays === Infinity) score += 8;
+
   const sharpness = Math.min(1.5, 0.4 + prefs.totalFeedback * 0.04);
-  return Math.max(0.05, Math.pow(Math.max(score, 0.05), sharpness));
+  return Math.max(0.02, Math.pow(Math.max(score, 0.02), sharpness));
 }
 
 /** Weighted random pick. Excludes forceExclude ids. */
@@ -84,6 +99,14 @@ export function pickAlbum(
     const matched = candidates.filter((a) => a.moods.includes(mode));
     if (matched.length >= 3) candidates = matched;
   }
+
+  // Prefer never-suggested AI albums when we have a fresh set
+  const freshAi = candidates.filter(
+    (a) =>
+      (prefs.aiAlbums ?? []).some((x) => x.id === a.id) &&
+      !prefs.suggested[a.id],
+  );
+  if (freshAi.length >= 3) candidates = freshAi;
 
   const pool = candidates.length > 0 ? candidates : all;
 
@@ -120,8 +143,11 @@ export function getStickyOrPick(
     }
   }
 
-  const exclude =
-    reshuffle && prefs.dailyPick[key] ? [prefs.dailyPick[key]] : [];
+  const exclude = [
+    ...(reshuffle && prefs.dailyPick[key] ? [prefs.dailyPick[key]] : []),
+    // When asking for another, also skip recently shown albums
+    ...(reshuffle ? recentSuggestedIds(prefs, 21) : []),
+  ];
   const album = pickAlbum(prefs, { forceExclude: exclude, mode });
   const nextPrefs = {
     ...prefs,

@@ -3,6 +3,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { geminiConfigured, suggestAlbumsFromLikes } from "./gemini.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -24,6 +25,8 @@ const emptyPreferences = () => ({
   dailyPick: {},
   totalFeedback: 0,
   customAlbums: [],
+  aiAlbums: [],
+  aiAlbumsUpdatedAt: null,
   activeMode: "any",
 });
 
@@ -110,8 +113,38 @@ function publicProfile(profile) {
       ...emptyPreferences(),
       ...(profile.preferences || {}),
       customAlbums: profile.preferences?.customAlbums || [],
+      aiAlbums: profile.preferences?.aiAlbums || [],
+      aiAlbumsUpdatedAt: profile.preferences?.aiAlbumsUpdatedAt || null,
     },
   };
+}
+
+function resolveAlbumRef(id, prefs, catalogHints = []) {
+  const customs = prefs.customAlbums || [];
+  const ai = prefs.aiAlbums || [];
+  return (
+    customs.find((a) => a.id === id) ||
+    ai.find((a) => a.id === id) ||
+    catalogHints.find((a) => a.id === id) ||
+    null
+  );
+}
+
+function likedAlbumRefs(prefs) {
+  const out = [];
+  for (const [id, score] of Object.entries(prefs.liked || {})) {
+    if (!(score > 0)) continue;
+    const album = resolveAlbumRef(id, prefs);
+    if (album) out.push({ title: album.title, artist: album.artist });
+  }
+  return out;
+}
+
+function dislikedAlbumRefs(prefs) {
+  return (prefs.disliked || [])
+    .map((id) => resolveAlbumRef(id, prefs))
+    .filter(Boolean)
+    .map((a) => ({ title: a.title, artist: a.artist }));
 }
 
 ensureDir(DATA_DIR);
@@ -121,7 +154,12 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "spin-api", maxProfiles: MAX_PROFILES });
+  res.json({
+    ok: true,
+    service: "spin-api",
+    maxProfiles: MAX_PROFILES,
+    gemini: geminiConfigured(),
+  });
 });
 
 app.post("/api/rooms/join", (req, res) => {
@@ -213,9 +251,69 @@ app.put("/api/rooms/:code/profiles/:id/preferences", (req, res) => {
     customAlbums: Array.isArray(preferences.customAlbums)
       ? preferences.customAlbums
       : [],
+    aiAlbums: Array.isArray(preferences.aiAlbums) ? preferences.aiAlbums : [],
+    aiAlbumsUpdatedAt: preferences.aiAlbumsUpdatedAt || null,
   };
   saveProfile(code, profile);
   res.json(publicProfile(profile));
+});
+
+/**
+ * Refresh AI album suggestions from Gemini.
+ * Call only when a profile newly likes an album (frontend-gated).
+ */
+app.post("/api/rooms/:code/profiles/:id/ai-suggest", async (req, res) => {
+  const code = normalizeCode(req.params.code);
+  const profile = getProfile(code, req.params.id);
+  if (!profile) return res.status(404).json({ error: "Profile not found." });
+
+  const prefs = {
+    ...emptyPreferences(),
+    ...(profile.preferences || {}),
+    customAlbums: profile.preferences?.customAlbums || [],
+    aiAlbums: profile.preferences?.aiAlbums || [],
+  };
+
+  // Allow client to pass explicit like/dislike snapshots (includes brand-new like
+  // before prefs sync lands), falling back to stored profile prefs.
+  const bodyLikes = Array.isArray(req.body?.likes) ? req.body.likes : null;
+  const bodyDislikes = Array.isArray(req.body?.dislikes)
+    ? req.body.dislikes
+    : null;
+  const bodyAvoid = Array.isArray(req.body?.avoid) ? req.body.avoid : null;
+
+  const likes = bodyLikes || likedAlbumRefs(prefs);
+  const dislikes = bodyDislikes || dislikedAlbumRefs(prefs);
+  const avoid =
+    bodyAvoid ||
+    (prefs.aiAlbums || []).map((a) => ({ title: a.title, artist: a.artist }));
+
+  try {
+    const result = await suggestAlbumsFromLikes({
+      likes,
+      dislikes,
+      avoid,
+      count: req.body?.count,
+    });
+
+    prefs.aiAlbums = result.albums;
+    prefs.aiAlbumsUpdatedAt = result.generatedAt;
+    profile.preferences = prefs;
+    saveProfile(code, profile);
+
+    res.json({
+      albums: result.albums,
+      generatedAt: result.generatedAt,
+      model: result.model,
+      profile: publicProfile(profile),
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({
+      error: err.message || "AI suggest failed",
+      gemini: geminiConfigured(),
+    });
+  }
 });
 
 app.get("/api/rooms/:code/inspiration", (req, res) => {

@@ -23,12 +23,19 @@ docker run -d \
   -e PORT=8787 \
   -e SPIN_DATA_DIR=/data \
   -e SPIN_MAX_PROFILES=8 \
+  -e GEMINI_API_KEY=YOUR_GEMINI_KEY_HERE \
+  -e GEMINI_MODEL=gemini-2.5-flash \
   spin-api
+
+Get a free Gemini key: https://aistudio.google.com/apikey
+Health check includes "gemini": true when the key is set.
+AI is only called when someone likes a *new* album (not on every spin).
 
 ------------------------------------------------
 Option B — old docker-compose (hyphen)
 ------------------------------------------------
 cd /volume1/docker/spin-api
+# put GEMINI_API_KEY=... in a .env file next to docker-compose.yml
 docker-compose up -d --build
 
 ------------------------------------------------
@@ -36,7 +43,7 @@ Test
 ------------------------------------------------
 curl http://YOUR_NAS_IP:8787/health
 
-You should see: {"ok":true,"service":"spin-api",...}
+You should see: {"ok":true,"service":"spin-api",...,"gemini":true|false}
 
 Then set up Cloudflare Tunnel (see README.md) and use that
 public URL + a room code in the SPIN website.

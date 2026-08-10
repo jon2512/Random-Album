@@ -17,13 +17,15 @@ export type ProfileLikedList = {
 
 function resolveAlbum(
   id: string,
-  prefs: Pick<PreferenceState, "customAlbums">,
+  prefs: Pick<PreferenceState, "customAlbums" | "aiAlbums">,
   extras: Album[] = [],
 ): Album | undefined {
   const fromCatalog = getAlbumById(id);
   if (fromCatalog) return fromCatalog;
   const fromOwn = (prefs.customAlbums ?? []).find((a) => a.id === id);
   if (fromOwn) return fromOwn;
+  const fromAi = (prefs.aiAlbums ?? []).find((a) => a.id === id);
+  if (fromAi) return fromAi;
   return extras.find((a) => a.id === id);
 }
 
@@ -69,7 +71,10 @@ export function otherProfilesLikedLists(
 ): ProfileLikedList[] {
   const poolExtras = [
     ...ALBUMS,
-    ...store.profiles.flatMap((p) => p.preferences.customAlbums ?? []),
+    ...store.profiles.flatMap((p) => [
+      ...(p.preferences.customAlbums ?? []),
+      ...(p.preferences.aiAlbums ?? []),
+    ]),
   ];
 
   return store.profiles
@@ -90,6 +95,7 @@ export function inspirationToLists(
     .map((p) => {
       const fakePrefs = {
         customAlbums: p.customAlbums ?? [],
+        aiAlbums: [],
       };
       const extras = [...ALBUMS, ...(p.customAlbums ?? [])];
       const likes: LikedAlbumEntry[] = Object.entries(p.liked || {})

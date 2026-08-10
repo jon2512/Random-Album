@@ -19,6 +19,12 @@ export type PreferenceState = {
   totalFeedback: number;
   /** Albums liked via search that aren't in the curated catalog */
   customAlbums: Album[];
+  /**
+   * Fresh set from Gemini, refreshed only when a new album is liked.
+   * Used to expand the spin pool beyond the curated catalog.
+   */
+  aiAlbums: Album[];
+  aiAlbumsUpdatedAt?: string | null;
   /** Last selected listening mode for this profile */
   activeMode?: import("@/lib/modes").SpinMode;
 };
@@ -36,6 +42,8 @@ export function emptyPreferences(): PreferenceState {
     dailyPick: {},
     totalFeedback: 0,
     customAlbums: [],
+    aiAlbums: [],
+    aiAlbumsUpdatedAt: null,
     activeMode: "any",
   };
 }
@@ -65,6 +73,8 @@ export function applyFeedback(
     artistScores: { ...state.artistScores },
     dailyPick: { ...state.dailyPick },
     customAlbums: [...(state.customAlbums ?? [])],
+    aiAlbums: [...(state.aiAlbums ?? [])],
+    aiAlbumsUpdatedAt: state.aiAlbumsUpdatedAt ?? null,
     totalFeedback: state.totalFeedback + 1,
   };
 
@@ -119,6 +129,19 @@ export function rememberAlbum(
   };
 }
 
+/** Replace the AI-suggested album set (called after a new like). */
+export function setAiAlbums(
+  state: PreferenceState,
+  albums: Album[],
+  updatedAt = new Date().toISOString(),
+): PreferenceState {
+  return {
+    ...state,
+    aiAlbums: albums,
+    aiAlbumsUpdatedAt: updatedAt,
+  };
+}
+
 /** Remove an album from likes and undo the taste boost from liking it. */
 export function removeLike(
   state: PreferenceState,
@@ -137,6 +160,8 @@ export function removeLike(
     decadeScores: { ...state.decadeScores },
     artistScores: { ...state.artistScores },
     customAlbums: [...(state.customAlbums ?? [])],
+    aiAlbums: [...(state.aiAlbums ?? [])],
+    aiAlbumsUpdatedAt: state.aiAlbumsUpdatedAt ?? null,
   };
 
   delete next.liked[album.id];

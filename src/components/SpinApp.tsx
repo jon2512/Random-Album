@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import type { Album } from "@/data/albums";
+import { ALBUMS, type Album } from "@/data/albums";
 import AlbumSearch from "@/components/AlbumSearch";
 import FriendsLikes from "@/components/FriendsLikes";
 import ModeSelector from "@/components/ModeSelector";
@@ -16,6 +16,7 @@ import {
   fetchProfiles,
   loadActiveProfileId,
   loadSession,
+  refreshAiSuggestions,
   renameRemoteProfile,
   saveActiveProfileId,
   syncPreferences,
@@ -39,6 +40,7 @@ import {
   applyFeedback,
   rememberAlbum,
   removeLike,
+  setAiAlbums,
   todayKey,
   topTasteSummary,
   type PreferenceState,
@@ -80,6 +82,46 @@ function albumPhaseForPrefs(prefs: PreferenceState): {
   return { album: null, phase: "idle" };
 }
 
+function resolveFromPrefs(prefs: PreferenceState, id: string, seed?: Album) {
+  if (seed?.id === id) return seed;
+  return (
+    ALBUMS.find((a) => a.id === id) ||
+    (prefs.customAlbums ?? []).find((a) => a.id === id) ||
+    (prefs.aiAlbums ?? []).find((a) => a.id === id)
+  );
+}
+
+function refsForAi(prefs: PreferenceState, seed?: Album) {
+  const likes = Object.entries(prefs.liked ?? {})
+    .filter(([, score]) => score > 0)
+    .map(([id]) => resolveFromPrefs(prefs, id, seed))
+    .filter((a): a is Album => !!a)
+    .map((a) => ({ title: a.title, artist: a.artist }));
+
+  if (
+    seed &&
+    !likes.some(
+      (l) =>
+        l.title.toLowerCase() === seed.title.toLowerCase() &&
+        l.artist.toLowerCase() === seed.artist.toLowerCase(),
+    )
+  ) {
+    likes.unshift({ title: seed.title, artist: seed.artist });
+  }
+
+  const dislikes = (prefs.disliked ?? [])
+    .map((id) => resolveFromPrefs(prefs, id, seed))
+    .filter((a): a is Album => !!a)
+    .map((a) => ({ title: a.title, artist: a.artist }));
+
+  const avoid = (prefs.aiAlbums ?? []).map((a) => ({
+    title: a.title,
+    artist: a.artist,
+  }));
+
+  return { likes, dislikes, avoid };
+}
+
 export default function SpinApp() {
   const [hydrated, setHydrated] = useState(false);
   const [session, setSession] = useState<RoomSession | null>(null);
@@ -98,6 +140,7 @@ export default function SpinApp() {
   const [inspireLoading, setInspireLoading] = useState(false);
   const [, startTransition] = useTransition();
   const syncTimer = useRef<number | null>(null);
+  const aiBusy = useRef(false);
 
   const active: Profile | null = getActiveProfile(store);
   const prefs = active?.preferences ?? null;
@@ -178,6 +221,50 @@ export default function SpinApp() {
       ),
     }));
     queueSync(store.activeId, nextPrefs);
+  }
+
+  /** Only hits Gemini when a brand-new album is liked — replaces the AI pool. */
+  function refreshAiAfterNewLike(
+    nextPrefs: PreferenceState,
+    seed: Album,
+    wasAlreadyLiked: boolean,
+  ) {
+    if (wasAlreadyLiked || !session || !store.activeId) return;
+    if (aiBusy.current) return;
+    const profileId = store.activeId;
+    const room = session;
+    aiBusy.current = true;
+
+    void (async () => {
+      try {
+        // Sync likes first so the NAS profile is current, then refresh the AI set.
+        if (syncTimer.current) window.clearTimeout(syncTimer.current);
+        await syncPreferences(room, profileId, nextPrefs);
+        const payload = refsForAi(nextPrefs, seed);
+        const result = await refreshAiSuggestions(room, profileId, payload);
+        setStore((prev) => {
+          const profile = prev.profiles.find((p) => p.id === profileId);
+          if (!profile) return prev;
+          const withAi = setAiAlbums(
+            profile.preferences,
+            result.albums,
+            result.generatedAt,
+          );
+          queueSync(profileId, withAi);
+          return {
+            ...prev,
+            profiles: prev.profiles.map((p) =>
+              p.id === profileId ? { ...p, preferences: withAi } : p,
+            ),
+          };
+        });
+        showFlash(`AI refreshed — ${result.albums.length} new albums in the mix.`);
+      } catch {
+        // Soft fail: spinning still works on curated + custom albums.
+      } finally {
+        aiBusy.current = false;
+      }
+    })();
   }
 
   function enterWithProfile(profile: Profile, profiles: Profile[]) {
@@ -356,8 +443,11 @@ export default function SpinApp() {
 
   function onListened() {
     if (!prefs || !album) return;
-    setLocalPrefs(applyFeedback(prefs, album, "listened"));
+    const wasAlreadyLiked = (prefs.liked[album.id] ?? 0) > 0;
+    const next = applyFeedback(prefs, album, "listened");
+    setLocalPrefs(next);
     showFlash("Logged — taste updated.");
+    refreshAiAfterNewLike(next, album, wasAlreadyLiked);
   }
 
   function onDislike() {
@@ -385,10 +475,12 @@ export default function SpinApp() {
 
   function onSearchLike(hit: SearchHit) {
     if (!prefs) return;
+    const wasAlreadyLiked = (prefs.liked[hit.album.id] ?? 0) > 0;
     let next = rememberAlbum(prefs, hit.album);
     next = applyFeedback(next, hit.album, "listened");
     setLocalPrefs(next);
     showFlash(`Liked ${hit.album.title}.`);
+    refreshAiAfterNewLike(next, hit.album, wasAlreadyLiked);
   }
 
   function onSearchDislike(hit: SearchHit) {
@@ -401,10 +493,12 @@ export default function SpinApp() {
 
   function onFriendLike(albumToLike: Album) {
     if (!prefs) return;
+    const wasAlreadyLiked = (prefs.liked[albumToLike.id] ?? 0) > 0;
     let next = rememberAlbum(prefs, albumToLike);
     next = applyFeedback(next, albumToLike, "listened");
     setLocalPrefs(next);
     showFlash(`Liked ${albumToLike.title}.`);
+    refreshAiAfterNewLike(next, albumToLike, wasAlreadyLiked);
   }
 
   function onRemoveLike(albumToRemove: Album) {

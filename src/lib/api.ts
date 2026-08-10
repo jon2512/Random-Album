@@ -100,6 +100,8 @@ function hydrateProfile(raw: Profile): Profile {
       ...emptyPreferences(),
       ...(raw.preferences || {}),
       customAlbums: raw.preferences?.customAlbums ?? [],
+      aiAlbums: raw.preferences?.aiAlbums ?? [],
+      aiAlbumsUpdatedAt: raw.preferences?.aiAlbumsUpdatedAt ?? null,
     },
   };
 }
@@ -222,4 +224,37 @@ export async function fetchInspiration(
     `/api/rooms/${encodeURIComponent(session.roomCode)}/inspiration${q}`,
   );
   return result.profiles;
+}
+
+export type AlbumRef = { title: string; artist: string };
+
+export type AiSuggestResult = {
+  albums: import("@/data/albums").Album[];
+  generatedAt: string;
+  model: string;
+  profile: Profile;
+};
+
+/** Ask the NAS API to refresh Gemini suggestions for this profile. */
+export async function refreshAiSuggestions(
+  session: RoomSession,
+  profileId: string,
+  payload: {
+    likes: AlbumRef[];
+    dislikes: AlbumRef[];
+    avoid: AlbumRef[];
+  },
+): Promise<AiSuggestResult> {
+  const result = await api<AiSuggestResult>(
+    session,
+    `/api/rooms/${encodeURIComponent(session.roomCode)}/profiles/${encodeURIComponent(profileId)}/ai-suggest`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+  return {
+    ...result,
+    profile: hydrateProfile(result.profile),
+  };
 }
