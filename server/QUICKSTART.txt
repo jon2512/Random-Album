@@ -1,0 +1,44 @@
+SPIN API — Synology quick start
+================================
+
+Your Synology Docker often does NOT support:
+  docker compose up -d --build
+
+Use one of these instead:
+
+------------------------------------------------
+Option A — plain docker (works on most Synology)
+------------------------------------------------
+cd /volume1/docker/spin-api
+
+docker build -t spin-api .
+
+docker rm -f spin-api 2>/dev/null
+
+docker run -d \
+  --name spin-api \
+  --restart unless-stopped \
+  -p 8787:8787 \
+  -v /volume1/docker/spin-api/data:/data \
+  -e PORT=8787 \
+  -e SPIN_DATA_DIR=/data \
+  -e SPIN_MAX_PROFILES=8 \
+  spin-api
+
+------------------------------------------------
+Option B — old docker-compose (hyphen)
+------------------------------------------------
+cd /volume1/docker/spin-api
+docker-compose up -d --build
+
+------------------------------------------------
+Test
+------------------------------------------------
+curl http://YOUR_NAS_IP:8787/health
+
+You should see: {"ok":true,"service":"spin-api",...}
+
+Then set up Cloudflare Tunnel (see README.md) and use that
+public URL + a room code in the SPIN website.
+
+Data is stored in ./data — back that up.

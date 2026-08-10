@@ -4,38 +4,19 @@ Shared room for a few friends. **No accounts.** Everyone uses the same room code
 
 ## 1. Run the API on Synology (Docker)
 
-Copy the `server/` folder (or unzip `spin-api-nas.zip`) to e.g. `/volume1/docker/spin-api`.
+Copy the `server/` folder to your NAS, e.g. `/volume1/docker/spin-api`.
 
-**Synology tip:** many NAS installs don’t have `docker compose` (space). Use plain `docker` commands:
+In Container Manager / Docker:
 
 ```bash
 cd /volume1/docker/spin-api
-
-docker build -t spin-api .
-
-docker rm -f spin-api 2>/dev/null
-
-docker run -d \
-  --name spin-api \
-  --restart unless-stopped \
-  -p 8787:8787 \
-  -v /volume1/docker/spin-api/data:/data \
-  -e PORT=8787 \
-  -e SPIN_DATA_DIR=/data \
-  -e SPIN_MAX_PROFILES=8 \
-  spin-api
+docker compose up -d --build
 ```
 
-If you have the older standalone binary, this also works:
+- API: `http://NAS_LAN_IP:8787/health` should return `{"ok":true,...}`
+- Data is stored in `./data` (map this to a shared folder you back up)
 
-```bash
-docker-compose up -d --build
-```
-
-- Test: `http://NAS_LAN_IP:8787/health` → `{"ok":true,...}`
-- Data is stored in `./data` (back that folder up)
-
-Optional env:
+Optional env in `docker-compose.yml`:
 
 - `SPIN_MAX_PROFILES` — default `8`
 
