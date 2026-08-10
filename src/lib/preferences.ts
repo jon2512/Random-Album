@@ -119,6 +119,42 @@ export function rememberAlbum(
   };
 }
 
+/** Remove an album from likes and undo the taste boost from liking it. */
+export function removeLike(
+  state: PreferenceState,
+  album: Album,
+): PreferenceState {
+  if (!(album.id in (state.liked ?? {})) && !(album.id in (state.listened ?? {}))) {
+    return state;
+  }
+
+  const next: PreferenceState = {
+    ...state,
+    liked: { ...state.liked },
+    listened: { ...state.listened },
+    genreScores: { ...state.genreScores },
+    moodScores: { ...state.moodScores },
+    decadeScores: { ...state.decadeScores },
+    artistScores: { ...state.artistScores },
+    customAlbums: [...(state.customAlbums ?? [])],
+  };
+
+  delete next.liked[album.id];
+  delete next.listened[album.id];
+
+  const decade = album.year > 0 ? decadeOf(album.year) : null;
+  for (const g of album.genres) {
+    next.genreScores[g] = (next.genreScores[g] ?? 0) - 2;
+  }
+  for (const m of album.moods) {
+    next.moodScores[m] = (next.moodScores[m] ?? 0) - 1.5;
+  }
+  if (decade) next.decadeScores = bump(next.decadeScores, decade, -1.5);
+  next.artistScores = bump(next.artistScores, album.artist, -2.5);
+
+  return next;
+}
+
 export function todayKey(d = new Date()): string {
   return d.toISOString().slice(0, 10);
 }

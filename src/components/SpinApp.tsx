@@ -5,6 +5,7 @@ import type { Album } from "@/data/albums";
 import AlbumSearch from "@/components/AlbumSearch";
 import FriendsLikes from "@/components/FriendsLikes";
 import ModeSelector from "@/components/ModeSelector";
+import MyLikes from "@/components/MyLikes";
 import ProfilePicker from "@/components/ProfilePicker";
 import RoomJoin from "@/components/RoomJoin";
 import {
@@ -30,12 +31,14 @@ import {
 } from "@/lib/links";
 import {
   inspirationToLists,
+  likedAlbumsForProfile,
   type ProfileLikedList,
 } from "@/lib/likes";
 import { isSpinMode, modeLabel, type SpinMode } from "@/lib/modes";
 import {
   applyFeedback,
   rememberAlbum,
+  removeLike,
   todayKey,
   topTasteSummary,
   type PreferenceState,
@@ -56,7 +59,8 @@ type Phase =
   | "idle"
   | "revealed"
   | "search"
-  | "inspire";
+  | "inspire"
+  | "my-likes";
 
 function currentMode(prefs: PreferenceState): SpinMode {
   return isSpinMode(prefs.activeMode) ? prefs.activeMode : "any";
@@ -291,6 +295,11 @@ export default function SpinApp() {
     setPhase("search");
   }
 
+  function openMyLikes() {
+    setReturnPhase(phase === "revealed" ? "revealed" : "idle");
+    setPhase("my-likes");
+  }
+
   async function openInspire() {
     setReturnPhase(phase === "revealed" ? "revealed" : "idle");
     setPhase("inspire");
@@ -398,6 +407,12 @@ export default function SpinApp() {
     showFlash(`Liked ${albumToLike.title}.`);
   }
 
+  function onRemoveLike(albumToRemove: Album) {
+    if (!prefs) return;
+    setLocalPrefs(removeLike(prefs, albumToRemove));
+    showFlash(`Removed ${albumToRemove.title}.`);
+  }
+
   if (!hydrated || phase === "boot") {
     return (
       <main className="shell">
@@ -465,7 +480,8 @@ export default function SpinApp() {
           {phase !== "join-room" &&
             phase !== "pick-profile" &&
             phase !== "search" &&
-            phase !== "inspire" && <p className="taste">{taste}</p>}
+            phase !== "inspire" &&
+            phase !== "my-likes" && <p className="taste">{taste}</p>}
         </div>
       </header>
 
@@ -506,6 +522,14 @@ export default function SpinApp() {
         />
       )}
 
+      {phase === "my-likes" && active && (
+        <MyLikes
+          entries={likedAlbumsForProfile(active)}
+          onRemove={onRemoveLike}
+          onBack={closeOverlay}
+        />
+      )}
+
       {phase === "idle" && (
         <section className="hero hero--idle">
           <h1 className="headline">Your album for the drive.</h1>
@@ -533,6 +557,9 @@ export default function SpinApp() {
             </span>
           </button>
           <div className="idle-links">
+            <button type="button" className="text-link" onClick={openMyLikes}>
+              Your likes
+            </button>
             <button type="button" className="text-link" onClick={openSearch}>
               Search an album you like
             </button>
@@ -621,6 +648,9 @@ export default function SpinApp() {
           </div>
 
           <div className="idle-links">
+            <button type="button" className="text-link" onClick={openMyLikes}>
+              Your likes
+            </button>
             <button type="button" className="text-link" onClick={openSearch}>
               Search an album
             </button>
