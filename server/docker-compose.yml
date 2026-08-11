@@ -1,0 +1,17 @@
+services:
+  spin-api:
+    build: .
+    container_name: spin-api
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      # Synology: map to a shared folder, e.g. /volume1/docker/spin-data
+      - ./data:/data
+    environment:
+      PORT: "8787"
+      SPIN_DATA_DIR: /data
+      SPIN_MAX_PROFILES: "8"
+      # Free key from https://aistudio.google.com/apikey — only used when someone likes a new album
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "gemini-2.5-flash"

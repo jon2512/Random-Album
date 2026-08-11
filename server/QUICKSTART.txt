@@ -1,0 +1,58 @@
+SPIN API — Synology quick start
+================================
+
+Your Synology Docker often does NOT support:
+  docker compose up -d --build
+
+Use one of these instead:
+
+------------------------------------------------
+Option A — plain docker (works on most Synology)
+------------------------------------------------
+cd /volume1/docker/spin-api
+# or wherever you copied server/, e.g. /volume1/docker/server
+
+# Required once: bind-mount folder must exist
+sudo mkdir -p ./data
+
+docker build -t spin-api .
+
+docker rm -f spin-api 2>/dev/null
+
+docker run -d \
+  --name spin-api \
+  --restart unless-stopped \
+  -p 8787:8787 \
+  -v "$PWD/data":/data \
+  -e PORT=8787 \
+  -e SPIN_DATA_DIR=/data \
+  -e SPIN_MAX_PROFILES=8 \
+  -e GEMINI_API_KEY=YOUR_GEMINI_KEY_HERE \
+  -e GEMINI_MODEL=gemini-2.5-flash \
+  spin-api
+
+Get a free Gemini key: https://aistudio.google.com/apikey
+Health check includes "gemini": true when the key is set.
+AI is only called when someone likes a *new* album (not on every spin).
+
+Note: Synology often has NO `docker compose` plugin.
+Do not use `docker compose up -d` — use the docker build/run commands above.
+
+------------------------------------------------
+Option B — old docker-compose (hyphen)
+------------------------------------------------
+cd /volume1/docker/spin-api
+# put GEMINI_API_KEY=... in a .env file next to docker-compose.yml
+docker-compose up -d --build
+
+------------------------------------------------
+Test
+------------------------------------------------
+curl http://YOUR_NAS_IP:8787/health
+
+You should see: {"ok":true,"service":"spin-api",...,"gemini":true|false}
+
+Then set up Cloudflare Tunnel (see README.md) and use that
+public URL + a room code in the SPIN website.
+
+Data is stored in ./data — back that up.
